@@ -170,6 +170,15 @@ namespace MielShop.API.Services
         {
             try
             {
+                Console.WriteLine($"📧 Attempting to send email to {toEmail}");
+                Console.WriteLine($"🔧 SMTP Settings:");
+                Console.WriteLine($"   Server: {_emailSettings.SmtpServer}");
+                Console.WriteLine($"   Port: {_emailSettings.SmtpPort}");
+                Console.WriteLine($"   EnableSsl: {_emailSettings.EnableSsl}");
+                Console.WriteLine($"   Username: {_emailSettings.Username}");
+                Console.WriteLine($"   Password: {(_emailSettings.Password?.Length > 0 ? "****" : "NOT SET")}");
+                Console.WriteLine($"   Frontend URL: {_frontendUrl}");
+
                 var message = new MimeMessage();
                 message.From.Add(new MailboxAddress(_emailSettings.SenderName, _emailSettings.SenderEmail));
                 message.To.Add(new MailboxAddress("", toEmail));
@@ -183,21 +192,87 @@ namespace MielShop.API.Services
 
                 using var client = new SmtpClient();
 
+                // Set timeout to 30 seconds
+                client.Timeout = 30000;
+
+                Console.WriteLine($"🔌 Connecting to SMTP server...");
+
+                // Determine the correct SecureSocketOptions based on port
+                // Port 587 = StartTls (TLS upgrade after connection)
+                // Port 465 = SslOnConnect (SSL from the start)
+                // Port 25 = None (usually blocked by cloud providers)
+                SecureSocketOptions secureSocketOption;
+
+                if (_emailSettings.SmtpPort == 465)
+                {
+                    secureSocketOption = SecureSocketOptions.SslOnConnect;
+                    Console.WriteLine($"   Using SSL on Connect (Port 465)");
+                }
+                else if (_emailSettings.SmtpPort == 587)
+                {
+                    secureSocketOption = SecureSocketOptions.StartTls;
+                    Console.WriteLine($"   Using StartTLS (Port 587)");
+                }
+                else
+                {
+                    secureSocketOption = _emailSettings.EnableSsl ? SecureSocketOptions.StartTls : SecureSocketOptions.None;
+                    Console.WriteLine($"   Using {secureSocketOption}");
+                }
+
                 await client.ConnectAsync(
                     _emailSettings.SmtpServer,
                     _emailSettings.SmtpPort,
-                    _emailSettings.EnableSsl ? SecureSocketOptions.StartTls : SecureSocketOptions.None
+                    secureSocketOption
                 );
 
+                Console.WriteLine($"✅ Connected to SMTP server");
+                Console.WriteLine($"🔐 Authenticating...");
+
                 await client.AuthenticateAsync(_emailSettings.Username, _emailSettings.Password);
+
+                Console.WriteLine($"✅ Authenticated successfully");
+                Console.WriteLine($"📤 Sending email...");
+
                 await client.SendAsync(message);
-                await client.DisconnectAsync(true);
 
                 Console.WriteLine($"✅ Email sent successfully to {toEmail}");
+
+                await client.DisconnectAsync(true);
+            }
+            catch (System.Net.Sockets.SocketException ex)
+            {
+                Console.WriteLine($"❌ Socket Error: {ex.Message}");
+                Console.WriteLine($"   This usually means network/firewall issues or wrong port");
+                Console.WriteLine($"   Error Code: {ex.SocketErrorCode}");
+                Console.WriteLine($"   Stack Trace: {ex.StackTrace}");
+                throw new Exception($"Network error connecting to SMTP server: {ex.Message}", ex);
+            }
+            catch (System.TimeoutException ex)
+            {
+                Console.WriteLine($"❌ Timeout Error: {ex.Message}");
+                Console.WriteLine($"   SMTP server didn't respond in time");
+                Console.WriteLine($"   Check if port {_emailSettings.SmtpPort} is accessible from Render");
+                Console.WriteLine($"   Stack Trace: {ex.StackTrace}");
+                throw new Exception($"Timeout connecting to SMTP server on port {_emailSettings.SmtpPort}", ex);
+            }
+            catch (MailKit.Security.AuthenticationException ex)
+            {
+                Console.WriteLine($"❌ Authentication Error: {ex.Message}");
+                Console.WriteLine($"   Gmail App Password might be invalid or expired");
+                Console.WriteLine($"   Generate new App Password at: https://myaccount.google.com/apppasswords");
+                Console.WriteLine($"   Stack Trace: {ex.StackTrace}");
+                throw new Exception($"Authentication failed. Check Gmail App Password.", ex);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"❌ Error sending email to {toEmail}: {ex.Message}");
+                Console.WriteLine($"   Exception Type: {ex.GetType().Name}");
+                Console.WriteLine($"   Stack Trace: {ex.StackTrace}");
+                if (ex.InnerException != null)
+                {
+                    Console.WriteLine($"   Inner Exception: {ex.InnerException.Message}");
+                    Console.WriteLine($"   Inner Stack Trace: {ex.InnerException.StackTrace}");
+                }
                 throw;
             }
         }
