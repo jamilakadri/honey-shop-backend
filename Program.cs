@@ -13,21 +13,26 @@ var builder = WebApplication.CreateBuilder(args);
 
 // ✅ FIX POSTGRESQL DATETIME
 AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
-
 // Configuration de la base de données PostgreSQL
 var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL");
 
+Console.WriteLine($"🔍 DATABASE_URL exists: {!string.IsNullOrEmpty(connectionString)}");
+
 // Convert Render's PostgreSQL URL format to Npgsql format
-if (!string.IsNullOrEmpty(connectionString) && connectionString.StartsWith("postgres://"))
+if (!string.IsNullOrEmpty(connectionString) && (connectionString.StartsWith("postgres://") || connectionString.StartsWith("postgresql://")))
 {
     // Parse the URL
     var uri = new Uri(connectionString);
-    connectionString = $"Host={uri.Host};Port={uri.Port};Database={uri.AbsolutePath.TrimStart('/')};Username={uri.UserInfo.Split(':')[0]};Password={uri.UserInfo.Split(':')[1]};SSL Mode=Require;Trust Server Certificate=true";
+    var userInfo = uri.UserInfo.Split(':');
+    connectionString = $"Host={uri.Host};Port={uri.Port};Database={uri.AbsolutePath.TrimStart('/')};Username={userInfo[0]};Password={userInfo[1]};SSL Mode=Require;Trust Server Certificate=true";
+
+    Console.WriteLine($"✅ Using production database: {uri.Host}");
 }
 else
 {
     // Fallback to local development connection string
     connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+    Console.WriteLine("⚠️ Using local development database");
 }
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
