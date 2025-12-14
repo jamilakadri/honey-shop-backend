@@ -1,0 +1,6 @@
+@MielShop.API_HostAddress = http://localhost:5198
+
+GET {{MielShop.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
