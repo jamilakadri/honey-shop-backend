@@ -15,9 +15,20 @@ var builder = WebApplication.CreateBuilder(args);
 AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 
 // Configuration de la base de données PostgreSQL
-// Configuration de la base de données PostgreSQL
-var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL")
-    ?? builder.Configuration.GetConnectionString("DefaultConnection");
+var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL");
+
+// Convert Render's PostgreSQL URL format to Npgsql format
+if (!string.IsNullOrEmpty(connectionString) && connectionString.StartsWith("postgres://"))
+{
+    // Parse the URL
+    var uri = new Uri(connectionString);
+    connectionString = $"Host={uri.Host};Port={uri.Port};Database={uri.AbsolutePath.TrimStart('/')};Username={uri.UserInfo.Split(':')[0]};Password={uri.UserInfo.Split(':')[1]};SSL Mode=Require;Trust Server Certificate=true";
+}
+else
+{
+    // Fallback to local development connection string
+    connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+}
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(connectionString));
@@ -165,5 +176,20 @@ Console.WriteLine("🚀 Application started");
 Console.WriteLine($"📁 Uploads path: {uploadsPath}");
 Console.WriteLine($"🖼️ Products images: {productsPath}");
 Console.WriteLine($"🗂️ Categories images: {categoriesPath}");
-
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+    try
+    {
+        var context = services.GetRequiredService<ApplicationDbContext>();
+        Console.WriteLine("🔄 Applying database migrations...");
+        context.Database.Migrate();
+        Console.WriteLine("✅ Database migrated successfully");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Error migrating database: {ex.Message}");
+        throw;
+    }
+}
 app.Run();
