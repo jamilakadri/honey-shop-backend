@@ -22,7 +22,6 @@ var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL");
 
 Console.WriteLine($"🔍 DATABASE_URL exists: {!string.IsNullOrEmpty(connectionString)}");
 
-// Convert Railway/Render PostgreSQL URL format to Npgsql format
 // Check for DATABASE_URL from environment (Railway automatically provides this)
 if (!string.IsNullOrEmpty(connectionString))
 {
@@ -36,7 +35,8 @@ if (!string.IsNullOrEmpty(connectionString))
             var uri = new Uri(connectionString);
             var userInfo = uri.UserInfo.Split(':');
 
-            var builder = new NpgsqlConnectionStringBuilder
+            // Changed 'builder' to 'connBuilder' to avoid naming conflict
+            var connBuilder = new NpgsqlConnectionStringBuilder
             {
                 Host = uri.Host,
                 Port = uri.Port > 0 ? uri.Port : 5432,
@@ -53,8 +53,8 @@ if (!string.IsNullOrEmpty(connectionString))
                 ConnectionPruningInterval = 10
             };
 
-            connectionString = builder.ToString();
-            Console.WriteLine($"✅ Converted to Npgsql format: {uri.Host}:{builder.Port}/{builder.Database}");
+            connectionString = connBuilder.ToString();
+            Console.WriteLine($"✅ Converted to Npgsql format: {uri.Host}:{connBuilder.Port}/{connBuilder.Database}");
         }
         catch (Exception ex)
         {
@@ -73,6 +73,7 @@ else
     Console.WriteLine("⚠️ DATABASE_URL not found, using appsettings.json");
     connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 }
+
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(connectionString));
 
