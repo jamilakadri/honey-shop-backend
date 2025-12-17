@@ -16,23 +16,24 @@ namespace MielShop.API.Services
         private readonly EmailSettings _emailSettings;
         private readonly string _frontendUrl;
         private readonly ILogger<EmailService> _logger;
-        private readonly IResend _resendClient;
+        private readonly IHttpClientFactory _httpClientFactory;
 
         public EmailService(
             IOptions<EmailSettings> emailSettings,
             IOptions<AppSettings> appSettings,
             ILogger<EmailService> logger,
-            IResend resendClient)
+            IHttpClientFactory httpClientFactory)
         {
             _emailSettings = emailSettings.Value;
             _frontendUrl = appSettings.Value.FrontendUrl;
             _logger = logger;
-            _resendClient = resendClient;
+            _httpClientFactory = httpClientFactory;
         }
 
         public async Task SendEmailVerificationAsync(string toEmail, string userName, string verificationToken)
         {
             var verificationUrl = $"{_frontendUrl}/verify-email?token={verificationToken}";
+
             var subject = "Vérifiez votre adresse email - MielShop";
             var body = $@"
 <!DOCTYPE html>
@@ -85,6 +86,7 @@ namespace MielShop.API.Services
         public async Task SendPasswordResetAsync(string toEmail, string userName, string resetToken)
         {
             var resetUrl = $"{_frontendUrl}/reset-password?token={resetToken}";
+
             var subject = "Réinitialisation de votre mot de passe - MielShop";
             var body = $@"
 <!DOCTYPE html>
@@ -175,10 +177,36 @@ namespace MielShop.API.Services
             try
             {
                 _logger.LogInformation($"📧 Attempting to send email to {toEmail}");
+                _logger.LogInformation($"🔧 Resend Settings:");
+                _logger.LogInformation($"   API Key: {(_emailSettings.ResendApiKey?.Length > 0 ? "SET (hidden)" : "NOT SET")}");
+                _logger.LogInformation($"   From Email: {_emailSettings.SenderEmail}");
+                _logger.LogInformation($"   From Name: {_emailSettings.SenderName}");
 
+                if (string.IsNullOrEmpty(_emailSettings.ResendApiKey))
+                {
+                    _logger.LogError("❌ Resend API key is not configured");
+                    throw new InvalidOperationException("Resend API key is missing. Please set EmailSettings:ResendApiKey");
+                }
+
+                // Create HttpClient
+                var httpClient = _httpClientFactory.CreateClient();
+
+                // Create Resend options
+                var resendOptions = new ResendClientOptions
+                {
+                    ApiToken = _emailSettings.ResendApiKey
+                };
+
+                // Create options wrapper
+                var optionsWrapper = new ResendOptionsWrapper(resendOptions);
+
+                // Create Resend client
+                var resend = new ResendClient(optionsWrapper, httpClient);
+
+                // Create email message
                 var message = new EmailMessage
                 {
-                    From = _emailSettings.SenderEmail,
+                    From = $"{_emailSettings.SenderName} <{_emailSettings.SenderEmail}>",
                     To = new[] { toEmail },
                     Subject = subject,
                     HtmlBody = htmlBody
@@ -186,16 +214,48 @@ namespace MielShop.API.Services
 
                 _logger.LogInformation($"📤 Sending email via Resend...");
 
-                var response = await _resendClient.EmailSendAsync(message);
+                // Send email
+                var response = await resend.EmailSendAsync(message);
 
-                _logger.LogInformation($"✅ Email sent successfully to {toEmail}");
-                _logger.LogInformation($"   Message ID: {response.Content}");
+                if (response != null && response.Content != Guid.Empty)
+                {
+                    _logger.LogInformation($"✅ Email sent successfully to {toEmail}");
+                    _logger.LogInformation($"   Message ID: {response.Content}");
+                }
+                else
+                {
+                    _logger.LogError($"❌ Failed to send email - no response or empty ID");
+                    throw new Exception("Failed to send email via Resend");
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"❌ Error sending email to {toEmail}");
+                _logger.LogError(ex, $"❌ Error sending email to {toEmail}: {ex.Message}");
+
+                if (ex.Message.Contains("API key") || ex.Message.Contains("Unauthorized"))
+                {
+                    _logger.LogError("💡 Make sure to:");
+                    _logger.LogError("   1. Get API key from https://resend.com/api-keys");
+                    _logger.LogError("   2. Set EmailSettings__ResendApiKey in environment variables");
+                }
+
                 throw;
             }
         }
+    }
+
+    // Classe wrapper pour IOptionsSnapshot<ResendClientOptions>
+    internal class ResendOptionsWrapper : IOptionsSnapshot<ResendClientOptions>
+    {
+        private readonly ResendClientOptions _options;
+
+        public ResendOptionsWrapper(ResendClientOptions options)
+        {
+            _options = options;
+        }
+
+        public ResendClientOptions Value => _options;
+
+        public ResendClientOptions Get(string name) => _options;
     }
 }

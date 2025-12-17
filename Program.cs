@@ -68,14 +68,15 @@ else
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(connectionString));
 
+/// ============================================
+// 📧 EMAIL CONFIGURATION (Resend)
 // ============================================
-// 📧 EMAIL CONFIGURATION (SendGrid)
-// ============================================
+builder.Services.AddHttpClient();
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));
 builder.Services.Configure<AppSettings>(builder.Configuration.GetSection("AppSettings"));
 builder.Services.AddScoped<IEmailService, EmailService>();
 
-Console.WriteLine("📧 Email service configured with SendGrid");
+Console.WriteLine("📧 Email service configured with Resend");
 
 // ============================================
 // ⭐ SERVICE REGISTRATION
