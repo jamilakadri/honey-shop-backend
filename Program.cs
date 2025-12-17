@@ -23,48 +23,56 @@ var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL");
 Console.WriteLine($"🔍 DATABASE_URL exists: {!string.IsNullOrEmpty(connectionString)}");
 
 // Convert Railway/Render PostgreSQL URL format to Npgsql format
-if (!string.IsNullOrEmpty(connectionString) && (connectionString.StartsWith("postgres://") || connectionString.StartsWith("postgresql://")))
+// Check for DATABASE_URL from environment (Railway automatically provides this)
+if (!string.IsNullOrEmpty(connectionString))
 {
-    try
-    {
-        // Parse the URL
-        var uri = new Uri(connectionString);
-        var userInfo = uri.UserInfo.Split(':');
-        var username = userInfo[0];
-        var password = userInfo.Length > 1 ? userInfo[1] : "";
-        var host = uri.Host;
-        var port = uri.Port > 0 ? uri.Port : 5432;
-        var database = uri.AbsolutePath.TrimStart('/');
+    Console.WriteLine("🔍 Found DATABASE_URL environment variable");
 
-        // Build connection string with Railway/Render compatible settings
-        var connectionStringBuilder = new NpgsqlConnectionStringBuilder
+    // Railway provides postgres:// format, convert to Npgsql format
+    if (connectionString.StartsWith("postgres://") || connectionString.StartsWith("postgresql://"))
+    {
+        try
         {
-            Host = host,
-            Port = port,
-            Username = username,
-            Password = password,
-            Database = database,
-            SslMode = SslMode.Require,
-            TrustServerCertificate = true
-        };
+            var uri = new Uri(connectionString);
+            var userInfo = uri.UserInfo.Split(':');
 
-        connectionString = connectionStringBuilder.ToString();
+            var builder = new NpgsqlConnectionStringBuilder
+            {
+                Host = uri.Host,
+                Port = uri.Port > 0 ? uri.Port : 5432,
+                Username = userInfo[0],
+                Password = userInfo.Length > 1 ? userInfo[1] : "",
+                Database = uri.AbsolutePath.TrimStart('/'),
+                SslMode = SslMode.Require,
+                TrustServerCertificate = true,
+                // Add these for Railway compatibility
+                Pooling = true,
+                MinPoolSize = 0,
+                MaxPoolSize = 100,
+                ConnectionIdleLifetime = 300,
+                ConnectionPruningInterval = 10
+            };
 
-        Console.WriteLine($"✅ Using production database: {host}:{port}/{database}");
+            connectionString = builder.ToString();
+            Console.WriteLine($"✅ Converted to Npgsql format: {uri.Host}:{builder.Port}/{builder.Database}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Error parsing DATABASE_URL: {ex.Message}");
+            Console.WriteLine($"❌ Raw DATABASE_URL value: {connectionString}");
+            throw;
+        }
     }
-    catch (Exception ex)
+    else
     {
-        Console.WriteLine($"❌ Error parsing DATABASE_URL: {ex.Message}");
-        throw;
+        Console.WriteLine("✅ Using DATABASE_URL as-is (already in connection string format)");
     }
 }
 else
 {
-    // Fallback to local development connection string
+    Console.WriteLine("⚠️ DATABASE_URL not found, using appsettings.json");
     connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
-    Console.WriteLine("⚠️ Using local development database");
 }
-
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(connectionString));
 
