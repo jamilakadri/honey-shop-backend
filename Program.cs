@@ -6,19 +6,23 @@ using MielShop.API.Data;
 using MielShop.API.Services;
 using MielShop.API.Helpers;
 using MielShop.API.Repositories;
-using MielShop.API.Models; // ✅ Pour EmailSettings et AppSettings
+using MielShop.API.Models;
 using Microsoft.Extensions.FileProviders;
+using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // ✅ FIX POSTGRESQL DATETIME
 AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
-// Configuration de la base de données PostgreSQL
+
+// ============================================
+// 🗄️ DATABASE CONFIGURATION
+// ============================================
 var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL");
 
 Console.WriteLine($"🔍 DATABASE_URL exists: {!string.IsNullOrEmpty(connectionString)}");
 
-// Convert Render's PostgreSQL URL format to Npgsql format
+// Convert Railway/Render PostgreSQL URL format to Npgsql format
 if (!string.IsNullOrEmpty(connectionString) && (connectionString.StartsWith("postgres://") || connectionString.StartsWith("postgresql://")))
 {
     try
@@ -29,12 +33,24 @@ if (!string.IsNullOrEmpty(connectionString) && (connectionString.StartsWith("pos
         var username = userInfo[0];
         var password = userInfo.Length > 1 ? userInfo[1] : "";
         var host = uri.Host;
-        var port = uri.Port > 0 ? uri.Port : 5432; // Default to 5432 if port is invalid
+        var port = uri.Port > 0 ? uri.Port : 5432;
         var database = uri.AbsolutePath.TrimStart('/');
 
-        connectionString = $"Host={host};Port={port};Database={database};Username={username};Password={password};SSL Mode=Require;Trust Server Certificate=true";
+        // Build connection string with Railway/Render compatible settings
+        var connectionStringBuilder = new NpgsqlConnectionStringBuilder
+        {
+            Host = host,
+            Port = port,
+            Username = username,
+            Password = password,
+            Database = database,
+            SslMode = SslMode.Require,
+            TrustServerCertificate = true
+        };
 
-        Console.WriteLine($"✅ Using production database: {host}:{port}");
+        connectionString = connectionStringBuilder.ToString();
+
+        Console.WriteLine($"✅ Using production database: {host}:{port}/{database}");
     }
     catch (Exception ex)
     {
@@ -51,15 +67,18 @@ else
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(connectionString));
+
 // ============================================
-// ✅ CONFIGURATION EMAIL
+// 📧 EMAIL CONFIGURATION (SendGrid)
 // ============================================
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));
 builder.Services.Configure<AppSettings>(builder.Configuration.GetSection("AppSettings"));
 builder.Services.AddScoped<IEmailService, EmailService>();
 
+Console.WriteLine("📧 Email service configured with SendGrid");
+
 // ============================================
-// ⭐ ENREGISTREMENT DES SERVICES
+// ⭐ SERVICE REGISTRATION
 // ============================================
 
 // UnitOfWork
@@ -70,7 +89,7 @@ builder.Services.AddScoped<ICartItemRepository, CartItemRepository>();
 builder.Services.AddScoped<IReviewRepository, ReviewRepository>();
 builder.Services.AddScoped<IWishlistRepository, WishlistRepository>();
 
-// Services métier
+// Business Services
 builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddScoped<ICategoryService, CategoryService>();
 builder.Services.AddScoped<ICartService, CartService>();
@@ -79,14 +98,16 @@ builder.Services.AddScoped<IReviewService, ReviewService>();
 builder.Services.AddScoped<IWishlistService, WishlistService>();
 builder.Services.AddScoped<IAdminService, AdminService>();
 
-// Services d'authentification
+// Authentication Services
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<JwtService>();
 
-// Service de gestion des utilisateurs
+// User Management Service
 builder.Services.AddScoped<IUserService, UserService>();
 
-// Configuration JWT
+// ============================================
+// 🔐 JWT CONFIGURATION
+// ============================================
 var jwtSettings = builder.Configuration.GetSection("JwtSettings");
 var secretKey = jwtSettings["Secret"];
 
@@ -115,19 +136,32 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-// CORS pour Angular
+// ============================================
+// 🌐 CORS CONFIGURATION
+// ============================================
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAngular", policy =>
     {
-        policy.WithOrigins("http://localhost:4200")
+        // Get allowed origins from configuration or environment
+        var allowedOrigins = new List<string> { "http://localhost:4200" };
+
+        // Add Railway frontend URL if available
+        var railwayFrontendUrl = Environment.GetEnvironmentVariable("FRONTEND_URL");
+        if (!string.IsNullOrEmpty(railwayFrontendUrl))
+        {
+            allowedOrigins.Add(railwayFrontendUrl);
+            Console.WriteLine($"✅ Added Railway frontend to CORS: {railwayFrontendUrl}");
+        }
+
+        policy.WithOrigins(allowedOrigins.ToArray())
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
     });
 });
 
-// Controllers avec configuration JSON
+// Controllers with JSON configuration
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -144,14 +178,19 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-// Pipeline de middleware
+// ============================================
+// 🔧 MIDDLEWARE PIPELINE
+// ============================================
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
-// Configuration des fichiers statiques
+// ============================================
+// 📁 STATIC FILES CONFIGURATION
+// ============================================
 var uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "uploads");
 if (!Directory.Exists(uploadsPath))
 {
@@ -181,19 +220,34 @@ app.UseStaticFiles(new StaticFileOptions
 });
 
 Console.WriteLine($"✅ Static files configured for: {uploadsPath}");
-Console.WriteLine($"✅ Accessible at: http://localhost:5198/uploads/");
+Console.WriteLine($"✅ Accessible at: /uploads/");
 
 app.UseStaticFiles();
 app.UseHttpsRedirection();
 app.UseCors("AllowAngular");
 app.UseAuthentication();
 app.UseAuthorization();
+
+// ============================================
+// 🏥 HEALTH CHECK ENDPOINT
+// ============================================
+app.MapGet("/health", () => Results.Ok(new
+{
+    status = "healthy",
+    timestamp = DateTime.UtcNow,
+    environment = app.Environment.EnvironmentName
+}));
+
 app.MapControllers();
 
 Console.WriteLine("🚀 Application started");
 Console.WriteLine($"📁 Uploads path: {uploadsPath}");
 Console.WriteLine($"🖼️ Products images: {productsPath}");
 Console.WriteLine($"🗂️ Categories images: {categoriesPath}");
+
+// ============================================
+// 🗄️ DATABASE MIGRATION
+// ============================================
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
@@ -207,7 +261,9 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         Console.WriteLine($"❌ Error migrating database: {ex.Message}");
+        Console.WriteLine($"Stack trace: {ex.StackTrace}");
         throw;
     }
 }
+
 app.Run();
