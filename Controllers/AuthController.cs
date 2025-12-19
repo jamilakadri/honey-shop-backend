@@ -1,8 +1,8 @@
-using Microsoft.AspNetCore.Authorization;
+ï»¿// AuthController.cs
 using Microsoft.AspNetCore.Mvc;
-using MielShop.API.DTOs.Auth;
+using Microsoft.AspNetCore.Authorization;
 using MielShop.API.Services;
-using System.Security.Claims;
+using MielShop.API.DTOs.Auth;
 
 namespace MielShop.API.Controllers
 {
@@ -11,193 +11,189 @@ namespace MielShop.API.Controllers
     public class AuthController : ControllerBase
     {
         private readonly IAuthService _authService;
+        private readonly ILogger<AuthController> _logger;
 
-        public AuthController(IAuthService authService)
+        public AuthController(IAuthService authService, ILogger<AuthController> logger)
         {
             _authService = authService;
+            _logger = logger;
         }
 
         [HttpPost("register")]
+        [AllowAnonymous]
         public async Task<IActionResult> Register([FromBody] RegisterDto registerDto)
         {
-            if (!ModelState.IsValid)
+            try
             {
-                return BadRequest(ModelState);
+                var result = await _authService.RegisterAsync(registerDto);
+                if (result == null)
+                {
+                    return BadRequest(new { message = "Cet email est dÃ©jÃ  utilisÃ©" });
+                }
+
+                return Ok(new
+                {
+                    message = "Inscription rÃ©ussie! Veuillez vÃ©rifier votre email.",
+                    data = result
+                });
             }
-
-            var result = await _authService.RegisterAsync(registerDto);
-
-            if (result == null)
+            catch (Exception ex)
             {
-                return BadRequest(new { message = "Cet email est déjà utilisé" });
+                _logger.LogError(ex, "Erreur lors de l'inscription");
+                return StatusCode(500, new { message = "Erreur serveur lors de l'inscription" });
             }
-
-            return Ok(new
-            {
-                message = "Inscription réussie. Veuillez vérifier votre email pour activer votre compte.",
-                data = result
-            });
         }
 
         [HttpPost("login")]
+        [AllowAnonymous]
         public async Task<IActionResult> Login([FromBody] LoginDto loginDto)
         {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ModelState);
-            }
-
             try
             {
                 var result = await _authService.LoginAsync(loginDto);
-
                 if (result == null)
                 {
                     return Unauthorized(new { message = "Email ou mot de passe incorrect" });
                 }
 
-                return Ok(new
-                {
-                    message = "Connexion réussie",
-                    data = result
-                });
+                return Ok(new { data = result });
             }
             catch (UnauthorizedAccessException ex)
             {
+                // Email non vÃ©rifiÃ©
                 return Unauthorized(new { message = ex.Message });
             }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Erreur lors de la connexion");
+                return StatusCode(500, new { message = "Erreur serveur lors de la connexion" });
+            }
         }
 
-        /// <summary>
-        /// Vérifier l'email avec le token
-        /// </summary>
         [HttpPost("verify-email")]
-        public async Task<IActionResult> VerifyEmail([FromBody] VerifyEmailDto verifyEmailDto)
+        [AllowAnonymous]
+        public async Task<IActionResult> VerifyEmail([FromBody] VerifyEmailDto dto)
         {
-            if (!ModelState.IsValid)
+            try
             {
-                return BadRequest(ModelState);
+                if (string.IsNullOrWhiteSpace(dto.Token))
+                {
+                    return BadRequest(new { message = "Token de vÃ©rification manquant" });
+                }
+
+                var result = await _authService.VerifyEmailAsync(dto.Token);
+
+                if (!result)
+                {
+                    return BadRequest(new { message = "Le token est invalide ou a expirÃ©" });
+                }
+
+                return Ok(new { message = "Email vÃ©rifiÃ© avec succÃ¨s!" });
             }
-
-            var result = await _authService.VerifyEmailAsync(verifyEmailDto.Token);
-
-            if (!result)
+            catch (Exception ex)
             {
-                return BadRequest(new { message = "Token invalide ou expiré" });
+                _logger.LogError(ex, "Erreur lors de la vÃ©rification d'email");
+                return StatusCode(500, new { message = "Erreur serveur lors de la vÃ©rification" });
             }
-
-            return Ok(new { message = "Email vérifié avec succès! Vous pouvez maintenant vous connecter." });
         }
 
-        /// <summary>
-        /// Renvoyer l'email de vérification
-        /// </summary>
         [HttpPost("resend-verification")]
-        public async Task<IActionResult> ResendVerification([FromBody] ResendVerificationEmailDto resendDto)
+        [AllowAnonymous] // âœ… IMPORTANT: Doit Ãªtre public
+        public async Task<IActionResult> ResendVerification([FromBody] ResendVerificationDto dto)
         {
-            if (!ModelState.IsValid)
+            try
             {
-                return BadRequest(ModelState);
+                _logger.LogInformation($"ðŸ“§ Resend verification request for: {dto.Email}");
+
+                // âœ… Validation de l'email
+                if (string.IsNullOrWhiteSpace(dto.Email))
+                {
+                    return BadRequest(new { message = "Adresse email requise" });
+                }
+
+                if (!IsValidEmail(dto.Email))
+                {
+                    return BadRequest(new { message = "Format d'email invalide" });
+                }
+
+                var result = await _authService.ResendVerificationEmailAsync(dto.Email);
+
+                if (!result)
+                {
+                    // âœ… Message plus clair
+                    return BadRequest(new
+                    {
+                        message = "Impossible de renvoyer l'email. VÃ©rifiez que l'adresse existe et n'est pas dÃ©jÃ  vÃ©rifiÃ©e."
+                    });
+                }
+
+                return Ok(new
+                {
+                    message = "Email de vÃ©rification renvoyÃ© avec succÃ¨s! VÃ©rifiez votre boÃ®te de rÃ©ception."
+                });
             }
-
-            var result = await _authService.ResendVerificationEmailAsync(resendDto.Email);
-
-            if (!result)
+            catch (Exception ex)
             {
-                return BadRequest(new { message = "Impossible de renvoyer l'email. Vérifiez que l'email existe et n'est pas déjà vérifié." });
+                _logger.LogError(ex, $"Erreur lors du renvoi d'email pour {dto.Email}");
+                return StatusCode(500, new
+                {
+                    message = "Erreur serveur lors de l'envoi de l'email"
+                });
             }
-
-            return Ok(new { message = "Email de vérification renvoyé avec succès. Vérifiez votre boîte de réception." });
-        }
-
-        [HttpGet("me")]
-        [Authorize]
-        public async Task<IActionResult> GetCurrentUser()
-        {
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null)
-            {
-                return Unauthorized(new { message = "Token invalide" });
-            }
-
-            var userId = int.Parse(userIdClaim.Value);
-            var user = await _authService.GetUserByIdAsync(userId);
-
-            if (user == null)
-            {
-                return NotFound(new { message = "Utilisateur non trouvé" });
-            }
-
-            return Ok(new
-            {
-                userId = user.UserId,
-                email = user.Email,
-                firstName = user.FirstName,
-                lastName = user.LastName,
-                phoneNumber = user.PhoneNumber,
-                role = user.Role,
-                isActive = user.IsActive,
-                emailConfirmed = user.EmailConfirmed
-            });
         }
 
         [HttpPost("change-password")]
         [Authorize]
-        public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto changePasswordDto)
+        public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto dto)
         {
-            if (!ModelState.IsValid)
+            try
             {
-                return BadRequest(ModelState);
-            }
+                var userId = int.Parse(User.FindFirst("userId")?.Value ?? "0");
 
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null)
+                if (userId == 0)
+                {
+                    return Unauthorized(new { message = "Utilisateur non authentifiÃ©" });
+                }
+
+                var result = await _authService.ChangePasswordAsync(userId, dto);
+
+                if (!result)
+                {
+                    return BadRequest(new { message = "Mot de passe actuel incorrect" });
+                }
+
+                return Ok(new { message = "Mot de passe modifiÃ© avec succÃ¨s" });
+            }
+            catch (Exception ex)
             {
-                return Unauthorized(new { message = "Token invalide" });
+                _logger.LogError(ex, "Erreur lors du changement de mot de passe");
+                return StatusCode(500, new { message = "Erreur serveur" });
             }
-
-            var userId = int.Parse(userIdClaim.Value);
-            var result = await _authService.ChangePasswordAsync(userId, changePasswordDto);
-
-            if (!result)
-            {
-                return BadRequest(new { message = "Mot de passe actuel incorrect" });
-            }
-
-            return Ok(new { message = "Mot de passe modifié avec succès" });
         }
 
-        [HttpPost("update-phone")]
-        [Authorize]
-        public async Task<IActionResult> UpdatePhone([FromBody] UpdatePhoneDto updatePhoneDto)
+        // âœ… Helper method pour valider l'email
+        private bool IsValidEmail(string email)
         {
-            if (!ModelState.IsValid)
+            try
             {
-                return BadRequest(ModelState);
+                var addr = new System.Net.Mail.MailAddress(email);
+                return addr.Address == email;
             }
-
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null)
+            catch
             {
-                return Unauthorized(new { message = "Token invalide" });
+                return false;
             }
-
-            var userId = int.Parse(userIdClaim.Value);
-            var result = await _authService.UpdatePhoneAsync(userId, updatePhoneDto.PhoneNumber);
-
-            if (!result)
-            {
-                return BadRequest(new { message = "Échec de la mise à jour du numéro de téléphone" });
-            }
-
-            return Ok(new { message = "Numéro de téléphone mis à jour avec succès" });
         }
+    }
 
-        [HttpPost("logout")]
-        [Authorize]
-        public IActionResult Logout()
-        {
-            return Ok(new { message = "Déconnexion réussie" });
-        }
+    // âœ… DTOs
+    public class VerifyEmailDto
+    {
+        public string Token { get; set; } = string.Empty;
+    }
+
+    public class ResendVerificationDto
+    {
+        public string Email { get; set; } = string.Empty;
     }
 }

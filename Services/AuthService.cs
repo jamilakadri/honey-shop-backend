@@ -185,40 +185,73 @@ namespace MielShop.API.Services
 
         public async Task<bool> ResendVerificationEmailAsync(string email)
         {
-            var user = await _context.Users
-                .FirstOrDefaultAsync(u => u.Email == email);
-
-            if (user == null)
-            {
-                return false; // Utilisateur non trouvé
-            }
-
-            if (user.EmailConfirmed)
-            {
-                return false; // Email déjà vérifié
-            }
-
-            // Générer un nouveau token
-            var verificationToken = GenerateVerificationToken();
-            user.EmailVerificationToken = verificationToken;
-            user.EmailVerificationTokenExpires = DateTime.UtcNow.AddHours(24);
-            user.UpdatedAt = DateTime.UtcNow;
-
-            await _context.SaveChangesAsync();
-
-            // Renvoyer l'email
             try
             {
-                await _emailService.SendEmailVerificationAsync(
-                    user.Email,
-                    $"{user.FirstName} {user.LastName}",
-                    verificationToken
-                );
-                return true;
+                // ✅ Nettoyer et normaliser l'email
+                email = email?.Trim().ToLowerInvariant();
+
+                if (string.IsNullOrWhiteSpace(email))
+                {
+                    Console.WriteLine("❌ Email vide ou null");
+                    return false;
+                }
+
+                Console.WriteLine($"🔍 Recherche de l'utilisateur: {email}");
+
+                var user = await _context.Users
+                    .FirstOrDefaultAsync(u => u.Email.ToLower() == email);
+
+                if (user == null)
+                {
+                    Console.WriteLine($"❌ Utilisateur non trouvé: {email}");
+                    return false;
+                }
+
+                Console.WriteLine($"✅ Utilisateur trouvé: {user.Email}");
+                Console.WriteLine($"   - EmailConfirmed: {user.EmailConfirmed}");
+                Console.WriteLine($"   - IsActive: {user.IsActive}");
+
+                if (user.EmailConfirmed)
+                {
+                    Console.WriteLine($"⚠️ Email déjà vérifié: {email}");
+                    return false;
+                }
+
+                // ✅ Générer un nouveau token
+                var verificationToken = GenerateVerificationToken();
+                user.EmailVerificationToken = verificationToken;
+                user.EmailVerificationTokenExpires = DateTime.UtcNow.AddHours(24);
+                user.UpdatedAt = DateTime.UtcNow;
+
+                await _context.SaveChangesAsync();
+                Console.WriteLine($"✅ Nouveau token généré et sauvegardé");
+
+                // ✅ Renvoyer l'email
+                try
+                {
+                    await _emailService.SendEmailVerificationAsync(
+                        user.Email,
+                        $"{user.FirstName} {user.LastName}",
+                        verificationToken
+                    );
+
+                    Console.WriteLine($"✅ Email envoyé avec succès à {user.Email}");
+                    return true;
+                }
+                catch (Exception emailEx)
+                {
+                    Console.WriteLine($"❌ Erreur envoi email: {emailEx.Message}");
+                    Console.WriteLine($"   Stack: {emailEx.StackTrace}");
+
+                    // ✅ Même si l'email échoue, on considère que la demande est valide
+                    // Le token est enregistré, l'utilisateur peut réessayer
+                    throw new Exception($"Erreur lors de l'envoi de l'email: {emailEx.Message}");
+                }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"⚠️ Erreur renvoi email: {ex.Message}");
+                Console.WriteLine($"❌ Erreur générale ResendVerification: {ex.Message}");
+                Console.WriteLine($"   Stack: {ex.StackTrace}");
                 return false;
             }
         }
