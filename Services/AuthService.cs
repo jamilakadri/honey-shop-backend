@@ -17,6 +17,7 @@ namespace MielShop.API.Services
         Task<bool> UpdatePhoneAsync(int userId, string phoneNumber);
         Task<bool> VerifyEmailAsync(string token);
         Task<bool> ResendVerificationEmailAsync(string email);
+        Task<User?> GetUserByEmailAsync(string email);
     }
 
     public class AuthService : IAuthService
@@ -94,7 +95,11 @@ namespace MielShop.API.Services
                 ExpiresAt = DateTime.UtcNow.AddHours(1)
             };
         }
-
+        public async Task<User?> GetUserByEmailAsync(string email)
+        {
+            return await _context.Users
+                .FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower());
+        }
         public async Task<AuthResponseDto?> LoginAsync(LoginDto loginDto)
         {
             // Trouver l'utilisateur par email

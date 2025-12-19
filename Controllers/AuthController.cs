@@ -1,5 +1,4 @@
-﻿// AuthController.cs
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using MielShop.API.Services;
 using MielShop.API.DTOs.Auth;
@@ -25,12 +24,16 @@ namespace MielShop.API.Controllers
         {
             try
             {
+                _logger.LogInformation($"📝 Registration attempt for: {registerDto.Email}");
+
                 var result = await _authService.RegisterAsync(registerDto);
                 if (result == null)
                 {
+                    _logger.LogWarning($"❌ Registration failed - email already exists: {registerDto.Email}");
                     return BadRequest(new { message = "Cet email est déjà utilisé" });
                 }
 
+                _logger.LogInformation($"✅ User registered successfully: {registerDto.Email}");
                 return Ok(new
                 {
                     message = "Inscription réussie! Veuillez vérifier votre email.",
@@ -39,7 +42,7 @@ namespace MielShop.API.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Erreur lors de l'inscription");
+                _logger.LogError(ex, $"❌ Error during registration for {registerDto.Email}");
                 return StatusCode(500, new { message = "Erreur serveur lors de l'inscription" });
             }
         }
@@ -50,22 +53,26 @@ namespace MielShop.API.Controllers
         {
             try
             {
+                _logger.LogInformation($"🔐 Login attempt for: {loginDto.Email}");
+
                 var result = await _authService.LoginAsync(loginDto);
                 if (result == null)
                 {
+                    _logger.LogWarning($"❌ Login failed - invalid credentials: {loginDto.Email}");
                     return Unauthorized(new { message = "Email ou mot de passe incorrect" });
                 }
 
+                _logger.LogInformation($"✅ Login successful: {loginDto.Email}");
                 return Ok(new { data = result });
             }
             catch (UnauthorizedAccessException ex)
             {
-                // Email non vérifié
+                _logger.LogWarning($"⚠️ Login blocked - email not verified: {loginDto.Email}");
                 return Unauthorized(new { message = ex.Message });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Erreur lors de la connexion");
+                _logger.LogError(ex, $"❌ Error during login for {loginDto.Email}");
                 return StatusCode(500, new { message = "Erreur serveur lors de la connexion" });
             }
         }
@@ -76,8 +83,11 @@ namespace MielShop.API.Controllers
         {
             try
             {
+                _logger.LogInformation($"✉️ Email verification attempt with token: {dto.Token?.Substring(0, 10)}...");
+
                 if (string.IsNullOrWhiteSpace(dto.Token))
                 {
+                    _logger.LogWarning("❌ Verification failed - missing token");
                     return BadRequest(new { message = "Token de vérification manquant" });
                 }
 
@@ -85,48 +95,59 @@ namespace MielShop.API.Controllers
 
                 if (!result)
                 {
+                    _logger.LogWarning($"❌ Verification failed - invalid or expired token");
                     return BadRequest(new { message = "Le token est invalide ou a expiré" });
                 }
 
+                _logger.LogInformation($"✅ Email verified successfully");
                 return Ok(new { message = "Email vérifié avec succès!" });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Erreur lors de la vérification d'email");
+                _logger.LogError(ex, "❌ Error during email verification");
                 return StatusCode(500, new { message = "Erreur serveur lors de la vérification" });
             }
         }
 
         [HttpPost("resend-verification")]
-        [AllowAnonymous] // ✅ IMPORTANT: Doit être public
+        [AllowAnonymous]
         public async Task<IActionResult> ResendVerification([FromBody] ResendVerificationDto dto)
         {
             try
             {
-                _logger.LogInformation($"📧 Resend verification request for: {dto.Email}");
+                _logger.LogInformation($"📧 ===== RESEND VERIFICATION REQUEST =====");
+                _logger.LogInformation($"📧 Email: {dto.Email}");
 
-                // ✅ Validation de l'email
+                // ✅ Validation
                 if (string.IsNullOrWhiteSpace(dto.Email))
                 {
+                    _logger.LogWarning("❌ Resend failed - missing email");
                     return BadRequest(new { message = "Adresse email requise" });
                 }
 
                 if (!IsValidEmail(dto.Email))
                 {
+                    _logger.LogWarning($"❌ Resend failed - invalid email format: {dto.Email}");
                     return BadRequest(new { message = "Format d'email invalide" });
                 }
 
+                _logger.LogInformation($"✅ Email validation passed");
+                _logger.LogInformation($"🔍 Calling ResendVerificationEmailAsync...");
+
                 var result = await _authService.ResendVerificationEmailAsync(dto.Email);
+
+                _logger.LogInformation($"📧 ResendVerificationEmailAsync returned: {result}");
 
                 if (!result)
                 {
-                    // ✅ Message plus clair
+                    _logger.LogWarning($"❌ Resend failed - service returned false for {dto.Email}");
                     return BadRequest(new
                     {
                         message = "Impossible de renvoyer l'email. Vérifiez que l'adresse existe et n'est pas déjà vérifiée."
                     });
                 }
 
+                _logger.LogInformation($"✅ Verification email resent successfully to {dto.Email}");
                 return Ok(new
                 {
                     message = "Email de vérification renvoyé avec succès! Vérifiez votre boîte de réception."
@@ -134,11 +155,44 @@ namespace MielShop.API.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Erreur lors du renvoi d'email pour {dto.Email}");
+                _logger.LogError(ex, $"❌ Error resending verification email to {dto.Email}");
+                _logger.LogError($"   Message: {ex.Message}");
+                _logger.LogError($"   Stack: {ex.StackTrace}");
                 return StatusCode(500, new
                 {
                     message = "Erreur serveur lors de l'envoi de l'email"
                 });
+            }
+        }
+
+        // ✅ NEW ENDPOINT: Debug user status
+        [HttpGet("debug-user/{email}")]
+        [AllowAnonymous] // Remove this in production!
+        public async Task<IActionResult> DebugUser(string email)
+        {
+            try
+            {
+                var user = await _authService.GetUserByEmailAsync(email);
+
+                if (user == null)
+                {
+                    return NotFound(new { message = "User not found", email });
+                }
+
+                return Ok(new
+                {
+                    email = user.Email,
+                    emailConfirmed = user.EmailConfirmed,
+                    isActive = user.IsActive,
+                    hasVerificationToken = !string.IsNullOrEmpty(user.EmailVerificationToken),
+                    tokenExpires = user.EmailVerificationTokenExpires,
+                    createdAt = user.CreatedAt
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error debugging user {email}");
+                return StatusCode(500, new { message = ex.Message });
             }
         }
 
@@ -166,12 +220,11 @@ namespace MielShop.API.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Erreur lors du changement de mot de passe");
+                _logger.LogError(ex, "Error changing password");
                 return StatusCode(500, new { message = "Erreur serveur" });
             }
         }
 
-        // ✅ Helper method pour valider l'email
         private bool IsValidEmail(string email)
         {
             try
@@ -186,7 +239,7 @@ namespace MielShop.API.Controllers
         }
     }
 
-    // ✅ DTOs
+    // DTOs
     public class VerifyEmailDto
     {
         public string Token { get; set; } = string.Empty;
