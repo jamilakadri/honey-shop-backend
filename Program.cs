@@ -149,16 +149,23 @@ builder.Services.AddAuthentication(options =>
 // ============================================
 // 🌐 CORS CONFIGURATION
 // ============================================
+// ============================================
+// 🌐 CORS CONFIGURATION
+// ============================================
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAngular", policy =>
     {
         // Get allowed origins from configuration or environment
-        var allowedOrigins = new List<string> { "http://localhost:4200" };
+        var allowedOrigins = new List<string>
+        {
+            "http://localhost:4200",
+            "https://honey-shop-production-9137.up.railway.app"  // ← Add your frontend URL here
+        };
 
-        // Add Railway frontend URL if available
+        // Add Railway frontend URL if available from environment variable
         var railwayFrontendUrl = Environment.GetEnvironmentVariable("FRONTEND_URL");
-        if (!string.IsNullOrEmpty(railwayFrontendUrl))
+        if (!string.IsNullOrEmpty(railwayFrontendUrl) && !allowedOrigins.Contains(railwayFrontendUrl))
         {
             allowedOrigins.Add(railwayFrontendUrl);
             Console.WriteLine($"✅ Added Railway frontend to CORS: {railwayFrontendUrl}");
