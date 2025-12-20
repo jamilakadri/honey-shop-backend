@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using MielShop.API.Services;
 
 namespace MielShop.API.Controllers
@@ -28,7 +28,8 @@ namespace MielShop.API.Controllers
             }
         }
 
-        [HttpGet("recent-orders")]
+        // ✅ FIXED: Changed route to match frontend call
+        [HttpGet("orders/recent")]
         public async Task<IActionResult> GetRecentOrders()
         {
             try
@@ -42,7 +43,8 @@ namespace MielShop.API.Controllers
             }
         }
 
-        [HttpGet("top-products")]
+        // ✅ FIXED: Changed route to match frontend call
+        [HttpGet("products/top")]
         public async Task<IActionResult> GetTopProducts()
         {
             try

@@ -2,7 +2,8 @@
 using Microsoft.AspNetCore.Mvc;
 using MielShop.API.Services;
 using MielShop.API.Models;
-
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
 namespace MielShop.API.Controllers
 {
     [ApiController]
@@ -74,22 +75,75 @@ namespace MielShop.API.Controllers
         }
 
         // POST: api/products
+        // POST: api/products
         [HttpPost]
         [Authorize(Roles = "Admin")]
         public async Task<IActionResult> CreateProduct([FromBody] Product product)
         {
             if (!ModelState.IsValid)
             {
-                return BadRequest(ModelState);
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "Données invalides",
+                    errors = ModelState
+                });
             }
 
-            var createdProduct = await _productService.CreateProductAsync(product);
+            try
+            {
+                // ✅ Validate that CategoryId exists
+                if (product.CategoryId <= 0)
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Veuillez sélectionner une catégorie valide"
+                    });
+                }
 
-            return CreatedAtAction(
-                nameof(GetProductById),
-                new { id = createdProduct.ProductId },
-                new { message = "Produit créé avec succès", data = createdProduct }
-            );
+                var createdProduct = await _productService.CreateProductAsync(product);
+
+                return CreatedAtAction(
+                    nameof(GetProductById),
+                    new { id = createdProduct.ProductId },
+                    new
+                    {
+                        success = true,
+                        message = "Produit créé avec succès",
+                        data = createdProduct
+                    }
+                );
+            }
+            catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx)
+            {
+                // ✅ Better error handling for foreign key violations
+                if (pgEx.SqlState == "23503") // Foreign key violation
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "La catégorie sélectionnée n'existe pas. Veuillez créer une catégorie d'abord ou sélectionner une catégorie existante.",
+                        error = "INVALID_CATEGORY"
+                    });
+                }
+
+                return StatusCode(500, new
+                {
+                    success = false,
+                    message = "Erreur lors de la création du produit",
+                    error = ex.Message
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new
+                {
+                    success = false,
+                    message = "Erreur lors de la création du produit",
+                    error = ex.Message
+                });
+            }
         }
 
         // PUT: api/products/5
