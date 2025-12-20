@@ -294,6 +294,7 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         Console.WriteLine($"❌ Error migrating database: {ex.Message}");
+        Console.WriteLine($"❌ Error migrating database Djamila");
         Console.WriteLine($"Stack trace: {ex.StackTrace}");
         throw;
     }
