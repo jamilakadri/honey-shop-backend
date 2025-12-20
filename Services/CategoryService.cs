@@ -1,4 +1,4 @@
-using MielShop.API.Models;
+﻿using MielShop.API.Models;
 using MielShop.API.Repositories;
 
 namespace MielShop.API.Services
@@ -6,10 +6,12 @@ namespace MielShop.API.Services
     public class CategoryService : ICategoryService
     {
         private readonly IUnitOfWork _unitOfWork;
+        private readonly ICloudinaryService _cloudinaryService;
 
-        public CategoryService(IUnitOfWork unitOfWork)
+        public CategoryService(IUnitOfWork unitOfWork, ICloudinaryService cloudinaryService)
         {
             _unitOfWork = unitOfWork;
+            _cloudinaryService = cloudinaryService;
         }
 
         public async Task<IEnumerable<Category>> GetAllCategoriesAsync()
@@ -53,12 +55,21 @@ namespace MielShop.API.Services
             if (existingCategory == null)
                 return false;
 
+            // ✅ If image URL is changing and old one exists, delete from Cloudinary
+            if (!string.IsNullOrEmpty(existingCategory.ImageUrl) &&
+                existingCategory.ImageUrl != category.ImageUrl &&
+                !string.IsNullOrEmpty(category.ImageUrl))
+            {
+                await _cloudinaryService.DeleteImageAsync(existingCategory.ImageUrl);
+            }
+
             existingCategory.Name = category.Name;
             existingCategory.Slug = category.Slug;
             existingCategory.Description = category.Description;
             existingCategory.ImageUrl = category.ImageUrl;
             existingCategory.DisplayOrder = category.DisplayOrder;
             existingCategory.IsActive = category.IsActive;
+            //existingCategory.UpdatedAt = DateTime.UtcNow;
 
             _unitOfWork.Categories.Update(existingCategory);
             await _unitOfWork.SaveChangesAsync();
@@ -71,6 +82,12 @@ namespace MielShop.API.Services
             var category = await _unitOfWork.Categories.GetByIdAsync(categoryId);
             if (category == null)
                 return false;
+
+            // ✅ Delete image from Cloudinary if exists
+            if (!string.IsNullOrEmpty(category.ImageUrl))
+            {
+                await _cloudinaryService.DeleteImageAsync(category.ImageUrl);
+            }
 
             _unitOfWork.Categories.Delete(category);
             await _unitOfWork.SaveChangesAsync();

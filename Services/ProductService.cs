@@ -6,10 +6,12 @@ namespace MielShop.API.Services
     public class ProductService : IProductService
     {
         private readonly IUnitOfWork _unitOfWork;
+        private readonly ICloudinaryService _cloudinaryService;
 
-        public ProductService(IUnitOfWork unitOfWork)
+        public ProductService(IUnitOfWork unitOfWork, ICloudinaryService cloudinaryService)
         {
             _unitOfWork = unitOfWork;
+            _cloudinaryService = cloudinaryService;
         }
 
         public async Task<IEnumerable<Product>> GetAllProductsAsync()
@@ -211,9 +213,18 @@ namespace MielShop.API.Services
 
         public async Task<bool> DeleteProductAsync(int productId)
         {
-            var product = await _unitOfWork.Products.GetByIdAsync(productId);
+            var product = await _unitOfWork.Products.GetProductWithDetailsAsync(productId);
             if (product == null)
                 return false;
+
+            // ✅ Delete all product images from Cloudinary
+            if (product.ProductImages != null && product.ProductImages.Any())
+            {
+                foreach (var image in product.ProductImages)
+                {
+                    await _cloudinaryService.DeleteImageAsync(image.ImageUrl);
+                }
+            }
 
             _unitOfWork.Products.Delete(product);
             await _unitOfWork.SaveChangesAsync();
@@ -246,6 +257,7 @@ namespace MielShop.API.Services
             return product?.ProductImages ?? new List<ProductImage>();
         }
 
+        // ✅ UPDATED: Upload image to Cloudinary
         public async Task<ProductImage> AddProductImageAsync(ProductImage image)
         {
             image.CreatedAt = DateTime.UtcNow;
@@ -270,12 +282,17 @@ namespace MielShop.API.Services
             return existingImage;
         }
 
+        // ✅ UPDATED: Delete image from Cloudinary
         public async Task<bool> DeleteProductImageAsync(int imageId)
         {
             var image = await _unitOfWork.ProductImages.GetByIdAsync(imageId);
             if (image == null)
                 return false;
 
+            // Delete from Cloudinary
+            await _cloudinaryService.DeleteImageAsync(image.ImageUrl);
+
+            // Delete from database
             _unitOfWork.ProductImages.Delete(image);
             await _unitOfWork.SaveChangesAsync();
             return true;

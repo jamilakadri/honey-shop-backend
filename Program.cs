@@ -7,7 +7,6 @@ using MielShop.API.Services;
 using MielShop.API.Helpers;
 using MielShop.API.Repositories;
 using MielShop.API.Models;
-using Microsoft.Extensions.FileProviders;
 using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -35,7 +34,6 @@ if (!string.IsNullOrEmpty(connectionString))
             var uri = new Uri(connectionString);
             var userInfo = uri.UserInfo.Split(':');
 
-            // Changed 'builder' to 'connBuilder' to avoid naming conflict
             var connBuilder = new NpgsqlConnectionStringBuilder
             {
                 Host = uri.Host,
@@ -45,7 +43,6 @@ if (!string.IsNullOrEmpty(connectionString))
                 Database = uri.AbsolutePath.TrimStart('/'),
                 SslMode = SslMode.Require,
                 TrustServerCertificate = true,
-                // Add these for Railway compatibility
                 Pooling = true,
                 MinPoolSize = 0,
                 MaxPoolSize = 100,
@@ -77,7 +74,7 @@ else
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(connectionString));
 
-/// ============================================
+// ============================================
 // 📧 EMAIL CONFIGURATION (Resend)
 // ============================================
 builder.Services.AddHttpClient();
@@ -86,6 +83,14 @@ builder.Services.Configure<AppSettings>(builder.Configuration.GetSection("AppSet
 builder.Services.AddScoped<IEmailService, EmailService>();
 
 Console.WriteLine("📧 Email service configured with Resend");
+
+// ============================================
+// 📷 CLOUDINARY CONFIGURATION
+// ============================================
+builder.Services.Configure<CloudinarySettings>(builder.Configuration.GetSection("Cloudinary"));
+builder.Services.AddScoped<ICloudinaryService, CloudinaryService>();
+
+Console.WriteLine("📷 Cloudinary service configured");
 
 // ============================================
 // ⭐ SERVICE REGISTRATION
@@ -147,23 +152,18 @@ builder.Services.AddAuthentication(options =>
 });
 
 // ============================================
-// 🌐 CORS CONFIGURATION - UPDATED
-// ============================================
-// ============================================
-// 🌐 CORS CONFIGURATION - FIXED
+// 🌐 CORS CONFIGURATION
 // ============================================
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAngular", policy =>
     {
-        // Get allowed origins from configuration or environment
         var allowedOrigins = new List<string>
         {
-            "https://honey-shop-production-9137.up.railway.app",  // ✅ Your frontend URL
-            "http://localhost:4200"  // ✅ For local development
+            "https://honey-shop-production-9137.up.railway.app",
+            "http://localhost:4200"
         };
 
-        // Add Railway frontend URL if available from environment variable
         var railwayFrontendUrl = Environment.GetEnvironmentVariable("FRONTEND_URL");
         if (!string.IsNullOrEmpty(railwayFrontendUrl) && !allowedOrigins.Contains(railwayFrontendUrl))
         {
@@ -177,8 +177,6 @@ builder.Services.AddCors(options =>
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
-        // ❌ REMOVED: .SetIsOriginAllowedToAllowWildcardSubdomains()
-        // This was causing CORS to fail!
     });
 });
 
@@ -209,43 +207,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-// ============================================
-// 📁 STATIC FILES CONFIGURATION
-// ============================================
-var uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "uploads");
-if (!Directory.Exists(uploadsPath))
-{
-    Directory.CreateDirectory(uploadsPath);
-    Console.WriteLine($"✅ Created uploads directory: {uploadsPath}");
-}
-
-var productsPath = Path.Combine(uploadsPath, "products");
-var categoriesPath = Path.Combine(uploadsPath, "categories");
-
-if (!Directory.Exists(productsPath))
-{
-    Directory.CreateDirectory(productsPath);
-    Console.WriteLine($"✅ Created products directory: {productsPath}");
-}
-
-if (!Directory.Exists(categoriesPath))
-{
-    Directory.CreateDirectory(categoriesPath);
-    Console.WriteLine($"✅ Created categories directory: {categoriesPath}");
-}
-
-app.UseStaticFiles(new StaticFileOptions
-{
-    FileProvider = new PhysicalFileProvider(uploadsPath),
-    RequestPath = "/uploads"
-});
-
-Console.WriteLine($"✅ Static files configured for: {uploadsPath}");
-Console.WriteLine($"✅ Accessible at: /uploads/");
-
-app.UseStaticFiles();
-
-// ✅ IMPORTANT: CORS must come BEFORE Authentication and Authorization
+// ✅ CORS must come BEFORE Authentication and Authorization
 app.UseCors("AllowAngular");
 
 app.UseHttpsRedirection();
@@ -259,7 +221,8 @@ app.MapGet("/health", () => Results.Ok(new
 {
     status = "healthy",
     timestamp = DateTime.UtcNow,
-    environment = app.Environment.EnvironmentName
+    environment = app.Environment.EnvironmentName,
+    cloudinaryConfigured = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CLOUDINARY_CLOUD_NAME"))
 }));
 
 app.MapControllers();
@@ -279,9 +242,7 @@ else
 
 Console.WriteLine("🚀 Application started");
 Console.WriteLine($"🌐 Backend URL: {backendUrl}");
-Console.WriteLine($"📁 Uploads path: {uploadsPath}");
-Console.WriteLine($"🖼️ Products images: {productsPath}");
-Console.WriteLine($"🗂️ Categories images: {categoriesPath}");
+Console.WriteLine($"📷 Cloudinary configured: {!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CLOUDINARY_CLOUD_NAME"))}");
 
 // ============================================
 // 🗄️ DATABASE MIGRATION
@@ -299,7 +260,6 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         Console.WriteLine($"❌ Error migrating database: {ex.Message}");
-        Console.WriteLine($"❌ Error migrating database Djamila");
         Console.WriteLine($"Stack trace: {ex.StackTrace}");
         throw;
     }
