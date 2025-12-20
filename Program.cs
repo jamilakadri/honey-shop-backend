@@ -147,10 +147,7 @@ builder.Services.AddAuthentication(options =>
 });
 
 // ============================================
-// 🌐 CORS CONFIGURATION
-// ============================================
-// ============================================
-// 🌐 CORS CONFIGURATION
+// 🌐 CORS CONFIGURATION - UPDATED
 // ============================================
 builder.Services.AddCors(options =>
 {
@@ -159,8 +156,7 @@ builder.Services.AddCors(options =>
         // Get allowed origins from configuration or environment
         var allowedOrigins = new List<string>
         {
-            "http://localhost:4200",
-            "https://honey-shop-production-9137.up.railway.app"  // ← Add your frontend URL here
+            "https://honey-shop-production-9137.up.railway.app"  // ✅ Your frontend URL
         };
 
         // Add Railway frontend URL if available from environment variable
@@ -171,10 +167,13 @@ builder.Services.AddCors(options =>
             Console.WriteLine($"✅ Added Railway frontend to CORS: {railwayFrontendUrl}");
         }
 
+        Console.WriteLine($"🌐 CORS allowed origins: {string.Join(", ", allowedOrigins)}");
+
         policy.WithOrigins(allowedOrigins.ToArray())
               .AllowAnyHeader()
               .AllowAnyMethod()
-              .AllowCredentials();
+              .AllowCredentials()
+              .SetIsOriginAllowedToAllowWildcardSubdomains(); // ✅ Added for flexibility
     });
 });
 
@@ -240,8 +239,11 @@ Console.WriteLine($"✅ Static files configured for: {uploadsPath}");
 Console.WriteLine($"✅ Accessible at: /uploads/");
 
 app.UseStaticFiles();
-app.UseHttpsRedirection();
+
+// ✅ IMPORTANT: CORS must come BEFORE Authentication and Authorization
 app.UseCors("AllowAngular");
+
+app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -257,7 +259,21 @@ app.MapGet("/health", () => Results.Ok(new
 
 app.MapControllers();
 
+// ============================================
+// 🌐 ENVIRONMENT CONFIGURATION LOGGING
+// ============================================
+var backendUrl = Environment.GetEnvironmentVariable("RAILWAY_PUBLIC_DOMAIN");
+if (!string.IsNullOrEmpty(backendUrl))
+{
+    backendUrl = $"https://{backendUrl}";
+}
+else
+{
+    backendUrl = builder.Configuration["AppSettings:BackendUrl"] ?? "http://localhost:5198";
+}
+
 Console.WriteLine("🚀 Application started");
+Console.WriteLine($"🌐 Backend URL: {backendUrl}");
 Console.WriteLine($"📁 Uploads path: {uploadsPath}");
 Console.WriteLine($"🖼️ Products images: {productsPath}");
 Console.WriteLine($"🗂️ Categories images: {categoriesPath}");
