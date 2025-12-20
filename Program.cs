@@ -149,6 +149,9 @@ builder.Services.AddAuthentication(options =>
 // ============================================
 // 🌐 CORS CONFIGURATION - UPDATED
 // ============================================
+// ============================================
+// 🌐 CORS CONFIGURATION - FIXED
+// ============================================
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAngular", policy =>
@@ -156,7 +159,8 @@ builder.Services.AddCors(options =>
         // Get allowed origins from configuration or environment
         var allowedOrigins = new List<string>
         {
-            "https://honey-shop-production-9137.up.railway.app"  // ✅ Your frontend URL
+            "https://honey-shop-production-9137.up.railway.app",  // ✅ Your frontend URL
+            "http://localhost:4200"  // ✅ For local development
         };
 
         // Add Railway frontend URL if available from environment variable
@@ -172,8 +176,9 @@ builder.Services.AddCors(options =>
         policy.WithOrigins(allowedOrigins.ToArray())
               .AllowAnyHeader()
               .AllowAnyMethod()
-              .AllowCredentials()
-              .SetIsOriginAllowedToAllowWildcardSubdomains(); // ✅ Added for flexibility
+              .AllowCredentials();
+        // ❌ REMOVED: .SetIsOriginAllowedToAllowWildcardSubdomains()
+        // This was causing CORS to fail!
     });
 });
 
