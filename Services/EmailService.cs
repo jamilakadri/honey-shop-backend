@@ -154,7 +154,7 @@ namespace MielShop.API.Services
 <body>
     <div class='container'>
         <div class='header'>
-            <h1>🍯 Bienvenue sur MielShop!</h1>
+            <h1>🍯 Bienvenue sur Miel De Aoussou!</h1>
         </div>
         <div class='content'>
             <h2>Félicitations {userName}!</h2>
@@ -163,7 +163,7 @@ namespace MielShop.API.Services
             <p>Commencez dès maintenant à explorer notre catalogue!</p>
         </div>
         <div class='footer'>
-            <p>&copy; 2024 MielShop. Tous droits réservés.</p>
+            <p>&copy; 2025 Miel De Aoussou. Tous droits réservés.</p>
         </div>
     </div>
 </body>
