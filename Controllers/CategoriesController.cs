@@ -193,7 +193,7 @@ namespace MielShop.API.Controllers
             {
                 if (file == null || file.Length == 0)
                 {
-                    return BadRequest(new { success = false, message = "Aucun fichier fourni" });
+                    return BadRequest(new { success = false, message = "Aucun fichier fourni du tout" });
                 }
 
                 // Get existing category
