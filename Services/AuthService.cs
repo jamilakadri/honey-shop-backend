@@ -4,7 +4,6 @@ using MielShop.API.DTOs.Auth;
 using MielShop.API.Helpers;
 using MielShop.API.Models;
 using BCrypt.Net;
-using System.Security.Cryptography;
 
 namespace MielShop.API.Services
 {
@@ -15,8 +14,6 @@ namespace MielShop.API.Services
         Task<User?> GetUserByIdAsync(int userId);
         Task<bool> ChangePasswordAsync(int userId, ChangePasswordDto changePasswordDto);
         Task<bool> UpdatePhoneAsync(int userId, string phoneNumber);
-        Task<bool> VerifyEmailAsync(string token);
-        Task<bool> ResendVerificationEmailAsync(string email);
         Task<User?> GetUserByEmailAsync(string email);
     }
 
@@ -24,30 +21,39 @@ namespace MielShop.API.Services
     {
         private readonly ApplicationDbContext _context;
         private readonly JwtService _jwtService;
-        private readonly IEmailService _emailService;
+        private readonly IEmailValidationService _emailValidationService;
+        private readonly ILogger<AuthService> _logger;
 
-        public AuthService(ApplicationDbContext context, JwtService jwtService, IEmailService emailService)
+        public AuthService(
+            ApplicationDbContext context,
+            JwtService jwtService,
+            IEmailValidationService emailValidationService,
+            ILogger<AuthService> logger)
         {
             _context = context;
             _jwtService = jwtService;
-            _emailService = emailService;
+            _emailValidationService = emailValidationService;
+            _logger = logger;
         }
 
         public async Task<AuthResponseDto?> RegisterAsync(RegisterDto registerDto)
         {
-            // Vérifier si l'email existe déjà
-            if (await _context.Users.AnyAsync(u => u.Email == registerDto.Email))
+            // Check if email already exists in database
+            if (await _context.Users.AnyAsync(u => u.Email.ToLower() == registerDto.Email.ToLower()))
             {
-                return null; // Email déjà utilisé
+                _logger.LogWarning($"❌ Email already exists: {registerDto.Email}");
+                return null; // Email already used
             }
 
-            // Hasher le mot de passe
+            // ✅ VALIDATE EMAIL WITH ABSTRACTAPI
+            bool emailIsReal = await _emailValidationService.IsEmailRealAsync(registerDto.Email);
+
+            _logger.LogInformation($"📧 Email validation for {registerDto.Email}: {(emailIsReal ? "REAL" : "FAKE")}");
+
+            // Hash password
             var passwordHash = BCrypt.Net.BCrypt.HashPassword(registerDto.Password);
 
-            // Générer un token de vérification
-            var verificationToken = GenerateVerificationToken();
-
-            // Créer le nouvel utilisateur
+            // Create new user
             var user = new User
             {
                 Email = registerDto.Email,
@@ -56,9 +62,9 @@ namespace MielShop.API.Services
                 LastName = registerDto.LastName,
                 Role = "Customer",
                 IsActive = true,
-                EmailConfirmed = false,
-                EmailVerificationToken = verificationToken,
-                EmailVerificationTokenExpires = DateTime.UtcNow.AddHours(24),
+                EmailConfirmed = emailIsReal, // ✅ TRUE if real, FALSE if fake
+                EmailVerificationToken = null,
+                EmailVerificationTokenExpires = null,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
@@ -66,22 +72,9 @@ namespace MielShop.API.Services
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
 
-            // Envoyer l'email de vérification
-            try
-            {
-                await _emailService.SendEmailVerificationAsync(
-                    user.Email,
-                    $"{user.FirstName} {user.LastName}",
-                    verificationToken
-                );
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"⚠️ Erreur envoi email: {ex.Message}");
-                // On continue même si l'email échoue
-            }
+            _logger.LogInformation($"✅ User registered: {user.Email} (EmailConfirmed: {user.EmailConfirmed})");
 
-            // Générer le token JWT
+            // Generate JWT token
             var token = _jwtService.GenerateToken(user);
 
             return new AuthResponseDto
@@ -95,45 +88,46 @@ namespace MielShop.API.Services
                 ExpiresAt = DateTime.UtcNow.AddHours(1)
             };
         }
+
         public async Task<User?> GetUserByEmailAsync(string email)
         {
             return await _context.Users
                 .FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower());
         }
+
         public async Task<AuthResponseDto?> LoginAsync(LoginDto loginDto)
         {
-            // Trouver l'utilisateur par email
+            // Find user by email
             var user = await _context.Users
-                .FirstOrDefaultAsync(u => u.Email == loginDto.Email);
+                .FirstOrDefaultAsync(u => u.Email.ToLower() == loginDto.Email.ToLower());
 
             if (user == null)
             {
-                return null; // Utilisateur non trouvé
+                _logger.LogWarning($"❌ User not found: {loginDto.Email}");
+                return null;
             }
 
-            // Vérifier le mot de passe
+            // Verify password
             if (!BCrypt.Net.BCrypt.Verify(loginDto.Password, user.PasswordHash))
             {
-                return null; // Mot de passe incorrect
+                _logger.LogWarning($"❌ Invalid password for: {loginDto.Email}");
+                return null;
             }
 
-            // Vérifier si le compte est actif
+            // Check if account is active
             if (!user.IsActive)
             {
-                return null; // Compte désactivé
+                _logger.LogWarning($"❌ Account inactive: {loginDto.Email}");
+                return null;
             }
 
-            // ✅ BLOQUER SI EMAIL NON VÉRIFIÉ
-            if (!user.EmailConfirmed)
-            {
-                throw new UnauthorizedAccessException("Veuillez vérifier votre email avant de vous connecter");
-            }
-
-            // Mettre à jour la dernière connexion
+            // Update last login
             user.LastLogin = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
-            // Générer le token JWT
+            _logger.LogInformation($"✅ Login successful: {loginDto.Email} (EmailConfirmed: {user.EmailConfirmed})");
+
+            // Generate JWT token
             var token = _jwtService.GenerateToken(user);
 
             return new AuthResponseDto
@@ -146,119 +140,6 @@ namespace MielShop.API.Services
                 Token = token,
                 ExpiresAt = DateTime.UtcNow.AddHours(1)
             };
-        }
-
-        public async Task<bool> VerifyEmailAsync(string token)
-        {
-            var user = await _context.Users
-                .FirstOrDefaultAsync(u => u.EmailVerificationToken == token);
-
-            if (user == null)
-            {
-                return false; // Token invalide
-            }
-
-            // Vérifier si le token a expiré
-            if (user.EmailVerificationTokenExpires < DateTime.UtcNow)
-            {
-                return false; // Token expiré
-            }
-
-            // Marquer l'email comme vérifié
-            user.EmailConfirmed = true;
-            user.EmailVerificationToken = null;
-            user.EmailVerificationTokenExpires = null;
-            user.UpdatedAt = DateTime.UtcNow;
-
-            await _context.SaveChangesAsync();
-
-            // Envoyer un email de bienvenue
-            try
-            {
-                await _emailService.SendWelcomeEmailAsync(
-                    user.Email,
-                    $"{user.FirstName} {user.LastName}"
-                );
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"⚠️ Erreur envoi email bienvenue: {ex.Message}");
-            }
-
-            return true;
-        }
-
-        public async Task<bool> ResendVerificationEmailAsync(string email)
-        {
-            try
-            {
-                // ✅ Nettoyer et normaliser l'email
-                email = email?.Trim().ToLowerInvariant();
-
-                if (string.IsNullOrWhiteSpace(email))
-                {
-                    Console.WriteLine("❌ Email vide ou null");
-                    return false;
-                }
-
-                Console.WriteLine($"🔍 Recherche de l'utilisateur: {email}");
-
-                var user = await _context.Users
-                    .FirstOrDefaultAsync(u => u.Email.ToLower() == email);
-
-                if (user == null)
-                {
-                    Console.WriteLine($"❌ Utilisateur non trouvé: {email}");
-                    return false;
-                }
-
-                Console.WriteLine($"✅ Utilisateur trouvé: {user.Email}");
-                Console.WriteLine($"   - EmailConfirmed: {user.EmailConfirmed}");
-                Console.WriteLine($"   - IsActive: {user.IsActive}");
-
-                if (user.EmailConfirmed)
-                {
-                    Console.WriteLine($"⚠️ Email déjà vérifié: {email}");
-                    return false;
-                }
-
-                // ✅ Générer un nouveau token
-                var verificationToken = GenerateVerificationToken();
-                user.EmailVerificationToken = verificationToken;
-                user.EmailVerificationTokenExpires = DateTime.UtcNow.AddHours(24);
-                user.UpdatedAt = DateTime.UtcNow;
-
-                await _context.SaveChangesAsync();
-                Console.WriteLine($"✅ Nouveau token généré et sauvegardé");
-
-                // ✅ Renvoyer l'email
-                try
-                {
-                    await _emailService.SendEmailVerificationAsync(
-                        user.Email,
-                        $"{user.FirstName} {user.LastName}",
-                        verificationToken
-                    );
-
-                    Console.WriteLine($"✅ Email envoyé avec succès à {user.Email}");
-                    return true;
-                }
-                catch (Exception emailEx)
-                {
-                    Console.WriteLine($"❌ Erreur envoi email: {emailEx.Message}");
-                    Console.WriteLine($"   Stack: {emailEx.StackTrace}");
-
-                    // ✅ Même si l'email échoue, on considère que la demande est valide
-                    // Le token est enregistré, l'utilisateur peut réessayer
-                    throw new Exception($"Erreur lors de l'envoi de l'email: {emailEx.Message}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"❌ Erreur générale ResendVerification: {ex.Message}");
-                Console.WriteLine($"   Stack: {ex.StackTrace}");
-                return false;
-            }
         }
 
         public async Task<User?> GetUserByIdAsync(int userId)
@@ -274,13 +155,13 @@ namespace MielShop.API.Services
                 return false;
             }
 
-            // Vérifier l'ancien mot de passe
+            // Verify old password
             if (!BCrypt.Net.BCrypt.Verify(changePasswordDto.CurrentPassword, user.PasswordHash))
             {
                 return false;
             }
 
-            // Hasher le nouveau mot de passe
+            // Hash new password
             user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(changePasswordDto.NewPassword);
             user.UpdatedAt = DateTime.UtcNow;
 
@@ -299,20 +180,6 @@ namespace MielShop.API.Services
             user.PhoneNumber = phoneNumber;
             await _context.SaveChangesAsync();
             return true;
-        }
-
-        // Générer un token de vérification sécurisé
-        private string GenerateVerificationToken()
-        {
-            var randomBytes = new byte[32];
-            using (var rng = RandomNumberGenerator.Create())
-            {
-                rng.GetBytes(randomBytes);
-            }
-            return Convert.ToBase64String(randomBytes)
-                .Replace("+", "-")
-                .Replace("/", "_")
-                .Replace("=", "");
         }
     }
 }

@@ -21,12 +21,10 @@ var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL");
 
 Console.WriteLine($"🔍 DATABASE_URL exists: {!string.IsNullOrEmpty(connectionString)}");
 
-// Check for DATABASE_URL from environment (Railway automatically provides this)
 if (!string.IsNullOrEmpty(connectionString))
 {
     Console.WriteLine("🔍 Found DATABASE_URL environment variable");
 
-    // Railway provides postgres:// format, convert to Npgsql format
     if (connectionString.StartsWith("postgres://") || connectionString.StartsWith("postgresql://"))
     {
         try
@@ -56,13 +54,8 @@ if (!string.IsNullOrEmpty(connectionString))
         catch (Exception ex)
         {
             Console.WriteLine($"❌ Error parsing DATABASE_URL: {ex.Message}");
-            Console.WriteLine($"❌ Raw DATABASE_URL value: {connectionString}");
             throw;
         }
-    }
-    else
-    {
-        Console.WriteLine("✅ Using DATABASE_URL as-is (already in connection string format)");
     }
 }
 else
@@ -75,14 +68,12 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(connectionString));
 
 // ============================================
-// 📧 EMAIL CONFIGURATION (Resend)
+// 📧 EMAIL VALIDATION CONFIGURATION (AbstractAPI)
 // ============================================
 builder.Services.AddHttpClient();
-builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));
-builder.Services.Configure<AppSettings>(builder.Configuration.GetSection("AppSettings"));
-builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddScoped<IEmailValidationService, EmailValidationService>();
 
-Console.WriteLine("📧 Email service configured with Resend");
+Console.WriteLine("📧 Email validation service configured with AbstractAPI");
 
 // ============================================
 // 📷 CLOUDINARY CONFIGURATION
@@ -128,7 +119,7 @@ var secretKey = jwtSettings["Secret"];
 
 if (string.IsNullOrEmpty(secretKey))
 {
-    throw new InvalidOperationException("JWT Secret key is not configured in appsettings.json");
+    throw new InvalidOperationException("JWT Secret key is not configured");
 }
 
 builder.Services.AddAuthentication(options =>
@@ -180,7 +171,6 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Controllers with JSON configuration
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -191,7 +181,6 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.WriteIndented = true;
     });
 
-// Swagger
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -207,9 +196,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-// ✅ CORS must come BEFORE Authentication and Authorization
 app.UseCors("AllowAngular");
-
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -222,27 +209,13 @@ app.MapGet("/health", () => Results.Ok(new
     status = "healthy",
     timestamp = DateTime.UtcNow,
     environment = app.Environment.EnvironmentName,
-    cloudinaryConfigured = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CLOUDINARY_CLOUD_NAME"))
+    abstractApiConfigured = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ABSTRACT_API_KEY"))
 }));
 
 app.MapControllers();
 
-// ============================================
-// 🌐 ENVIRONMENT CONFIGURATION LOGGING
-// ============================================
-var backendUrl = Environment.GetEnvironmentVariable("RAILWAY_PUBLIC_DOMAIN");
-if (!string.IsNullOrEmpty(backendUrl))
-{
-    backendUrl = $"https://{backendUrl}";
-}
-else
-{
-    backendUrl = builder.Configuration["AppSettings:BackendUrl"] ?? "http://localhost:5198";
-}
-
 Console.WriteLine("🚀 Application started");
-Console.WriteLine($"🌐 Backend URL: {backendUrl}");
-Console.WriteLine($"📷 Cloudinary configured: {!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CLOUDINARY_CLOUD_NAME"))}");
+Console.WriteLine($"📧 AbstractAPI configured: {!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ABSTRACT_API_KEY"))}");
 
 // ============================================
 // 🗄️ DATABASE MIGRATION
@@ -260,7 +233,6 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         Console.WriteLine($"❌ Error migrating database: {ex.Message}");
-        Console.WriteLine($"Stack trace: {ex.StackTrace}");
         throw;
     }
 }
