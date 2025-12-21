@@ -4,6 +4,7 @@ using MielShop.API.Services;
 using MielShop.API.Models;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+
 namespace MielShop.API.Controllers
 {
     [ApiController]
@@ -11,10 +12,17 @@ namespace MielShop.API.Controllers
     public class ProductsController : ControllerBase
     {
         private readonly IProductService _productService;
+        private readonly ICloudinaryService _cloudinaryService;
+        private readonly ILogger<ProductsController> _logger;
 
-        public ProductsController(IProductService productService)
+        public ProductsController(
+            IProductService productService,
+            ICloudinaryService cloudinaryService,
+            ILogger<ProductsController> logger)
         {
             _productService = productService;
+            _cloudinaryService = cloudinaryService;
+            _logger = logger;
         }
 
         // GET: api/products
@@ -53,6 +61,18 @@ namespace MielShop.API.Controllers
             return Ok(product);
         }
 
+        // GET: api/products/slug/{slug}
+        [HttpGet("slug/{slug}")]
+        public async Task<IActionResult> GetProductBySlug(string slug)
+        {
+            var product = await _productService.GetProductBySlugAsync(slug);
+            if (product == null)
+            {
+                return NotFound(new { message = "Produit non trouvé" });
+            }
+            return Ok(product);
+        }
+
         // GET: api/products/category/5
         [HttpGet("category/{categoryId}")]
         public async Task<IActionResult> GetProductsByCategory(int categoryId)
@@ -75,7 +95,6 @@ namespace MielShop.API.Controllers
         }
 
         // POST: api/products
-        // POST: api/products
         [HttpPost]
         [Authorize(Roles = "Admin")]
         public async Task<IActionResult> CreateProduct([FromBody] Product product)
@@ -92,7 +111,6 @@ namespace MielShop.API.Controllers
 
             try
             {
-                // ✅ Validate that CategoryId exists
                 if (product.CategoryId <= 0)
                 {
                     return BadRequest(new
@@ -117,13 +135,12 @@ namespace MielShop.API.Controllers
             }
             catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx)
             {
-                // ✅ Better error handling for foreign key violations
-                if (pgEx.SqlState == "23503") // Foreign key violation
+                if (pgEx.SqlState == "23503")
                 {
                     return BadRequest(new
                     {
                         success = false,
-                        message = "La catégorie sélectionnée n'existe pas. Veuillez créer une catégorie d'abord ou sélectionner une catégorie existante.",
+                        message = "La catégorie sélectionnée n'existe pas.",
                         error = "INVALID_CATEGORY"
                     });
                 }
@@ -200,19 +217,10 @@ namespace MielShop.API.Controllers
 
             return Ok(new { message = "Stock mis à jour avec succès", newStock });
         }
-        // Add to ProductsController.cs - AFTER existing endpoints
-        // In ProductsController.cs, add ALL these image endpoints:
 
-        [HttpGet("slug/{slug}")]
-        public async Task<IActionResult> GetProductBySlug(string slug)
-        {
-            var product = await _productService.GetProductBySlugAsync(slug);
-            if (product == null)
-            {
-                return NotFound(new { message = "Produit non trouvé" });
-            }
-            return Ok(product);
-        }
+        // ============================================
+        // 📸 PRODUCT IMAGES - CLOUDINARY
+        // ============================================
 
         // GET: api/products/{id}/images
         [HttpGet("{id}/images")]
@@ -222,7 +230,85 @@ namespace MielShop.API.Controllers
             return Ok(images);
         }
 
-        // POST: api/products/{id}/images
+        // POST: api/products/{id}/images/upload - ✅ CLOUDINARY VERSION
+        [HttpPost("{id}/images/upload")]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> UploadProductImage(
+            int id,
+            [FromForm] IFormFile file,
+            [FromForm] string? altText,
+            [FromForm] int displayOrder = 0,
+            [FromForm] bool isPrimary = false)
+        {
+            try
+            {
+                // Verify product exists
+                var product = await _productService.GetProductByIdAsync(id);
+                if (product == null)
+                {
+                    return NotFound(new { success = false, message = "Produit non trouvé" });
+                }
+
+                // Validate file
+                if (file == null || file.Length == 0)
+                {
+                    return BadRequest(new { success = false, message = "Aucun fichier sélectionné" });
+                }
+
+                _logger.LogInformation($"📤 Uploading image to Cloudinary for product {id}");
+                _logger.LogInformation($"File: {file.FileName}, Size: {file.Length} bytes");
+
+                // ✅ Upload to Cloudinary
+                var imageUrl = await _cloudinaryService.UploadImageAsync(file, "miel-shop/products");
+
+                _logger.LogInformation($"✅ Image uploaded to Cloudinary: {imageUrl}");
+
+                // If isPrimary, unset other primary images
+                if (isPrimary)
+                {
+                    var existingImages = await _productService.GetProductImagesAsync(id);
+                    foreach (var existingImage in existingImages.Where(img => img.IsPrimary))
+                    {
+                        existingImage.IsPrimary = false;
+                        await _productService.UpdateProductImageAsync(existingImage);
+                    }
+                }
+
+                // Create database record with Cloudinary URL
+                var productImage = new ProductImage
+                {
+                    ProductId = id,
+                    ImageUrl = imageUrl, // ✅ Cloudinary URL
+                    AltText = altText ?? $"{product.Name} - Image",
+                    DisplayOrder = displayOrder,
+                    IsPrimary = isPrimary,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                var createdImage = await _productService.AddProductImageAsync(productImage);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Image uploadée avec succès",
+                    imageId = createdImage.ImageId,
+                    imageUrl = createdImage.ImageUrl,
+                    data = createdImage
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                _logger.LogWarning($"⚠️ Invalid file: {ex.Message}");
+                return BadRequest(new { success = false, message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"❌ Error uploading image: {ex.Message}");
+                return StatusCode(500, new { success = false, message = "Erreur lors de l'upload", error = ex.Message });
+            }
+        }
+
+        // POST: api/products/{id}/images - Add image with URL (for existing Cloudinary URLs)
         [HttpPost("{id}/images")]
         [Authorize(Roles = "Admin")]
         public async Task<IActionResult> AddProductImage(int id, [FromBody] ProductImage image)
@@ -253,7 +339,7 @@ namespace MielShop.API.Controllers
             return Ok(new { message = "Image mise à jour avec succès", data = updatedImage });
         }
 
-        // DELETE: api/products/{id}/images/{imageId}
+        // DELETE: api/products/{id}/images/{imageId} - ✅ Deletes from Cloudinary too
         [HttpDelete("{id}/images/{imageId}")]
         [Authorize(Roles = "Admin")]
         public async Task<IActionResult> DeleteProductImage(int id, int imageId)
@@ -266,105 +352,6 @@ namespace MielShop.API.Controllers
             }
 
             return Ok(new { message = "Image supprimée avec succès" });
-        }
-        // POST: api/products/{id}/images/upload
-        // POST: api/products/{id}/images/upload
-        [HttpPost("{id}/images/upload")]
-        [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> UploadProductImage(
-            int id,
-            [FromForm] IFormFile file,
-            [FromForm] string? altText,
-            [FromForm] int displayOrder = 0,
-            [FromForm] bool isPrimary = false)
-        {
-            // 1. Vérifier que le produit existe
-            var product = await _productService.GetProductByIdAsync(id);
-            if (product == null)
-            {
-                return NotFound(new { message = "Produit non trouvé" });
-            }
-
-            // 2. Valider le fichier
-            if (file == null || file.Length == 0)
-            {
-                return BadRequest(new { message = "Aucun fichier sélectionné" });
-            }
-
-            // 3. Validate file type
-            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
-            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
-
-            if (!allowedExtensions.Contains(extension))
-            {
-                return BadRequest(new { message = "Format d'image non supporté. Utilisez JPG, PNG, GIF ou WebP" });
-            }
-
-            // 4. Validate file size (max 5MB)
-            if (file.Length > 5 * 1024 * 1024)
-            {
-                return BadRequest(new { message = "L'image est trop volumineuse (max 5MB)" });
-            }
-
-            try
-            {
-                // 5. Create uploads directory if it doesn't exist
-                // ✅ CORRIGÉ: Même structure que les catégories (sans wwwroot)
-                var uploadsFolder = Path.Combine(Directory.GetCurrentDirectory(), "uploads", "products");
-                if (!Directory.Exists(uploadsFolder))
-                {
-                    Directory.CreateDirectory(uploadsFolder);
-                }
-
-                // 6. Generate unique filename
-                var uniqueFileName = $"{Guid.NewGuid()}{extension}";
-                var filePath = Path.Combine(uploadsFolder, uniqueFileName);
-
-                // 7. Save file to disk
-                using (var stream = new FileStream(filePath, FileMode.Create))
-                {
-                    await file.CopyToAsync(stream);
-                }
-
-                // 8. Si isPrimary, désactiver les autres images primaires
-                if (isPrimary)
-                {
-                    var existingImages = await _productService.GetProductImagesAsync(id);
-                    foreach (var existingImage in existingImages.Where(img => img.IsPrimary))
-                    {
-                        existingImage.IsPrimary = false;
-                        await _productService.UpdateProductImageAsync(existingImage);
-                    }
-                }
-
-                // 9. Create database record
-                var imageUrl = $"/uploads/products/{uniqueFileName}";
-                var productImage = new ProductImage
-                {
-                    ProductId = id,
-                    ImageUrl = imageUrl,
-                    AltText = altText ?? file.FileName,
-                    DisplayOrder = displayOrder,
-                    IsPrimary = isPrimary,
-                    CreatedAt = DateTime.UtcNow
-                };
-
-                var createdImage = await _productService.AddProductImageAsync(productImage);
-
-                return Ok(new
-                {
-                    message = "Image uploadée avec succès",
-                    imageId = createdImage.ImageId,
-                    imageUrl = createdImage.ImageUrl,
-                    data = createdImage
-                });
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"❌ Erreur upload: {ex.Message}");
-                Console.WriteLine($"Stack trace: {ex.StackTrace}");
-                return StatusCode(500, new { message = "Erreur lors de l'upload", error = ex.Message });
-            }
         }
     }
 }
