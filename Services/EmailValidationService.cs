@@ -24,93 +24,69 @@ namespace MielShop.API.Services
         {
             try
             {
-                var apiKey = Environment.GetEnvironmentVariable("ABSTRACT_API_KEY");
+                // Get EmailListVerify API key from environment
+                var apiKey = Environment.GetEnvironmentVariable("EMAILLISTVERIFY_API_KEY");
 
                 if (string.IsNullOrEmpty(apiKey))
                 {
-                    _logger.LogError("❌ ABSTRACT_API_KEY not found in environment variables!");
-                    _logger.LogWarning("⚠️ Allowing registration since API key is missing");
-                    return true; // ✅ ALLOW if API key missing (for now, until you add it to Railway)
+                    _logger.LogWarning("⚠️ EMAILLISTVERIFY_API_KEY not found - Allowing all registrations");
+                    return true; // Allow if no API key
                 }
 
                 var httpClient = _httpClientFactory.CreateClient();
-                var url = $"https://emailvalidation.abstractapi.com/v1/?api_key={apiKey}&email={email}";
+                // EmailListVerify API endpoint
+                var url = $"https://apps.emaillistverify.com/api/verifyEmail?secret={apiKey}&email={email}";
 
-                _logger.LogInformation($"🔍 Validating email with AbstractAPI: {email}");
+                _logger.LogInformation($"🔍 Validating email with EmailListVerify: {email}");
 
                 var response = await httpClient.GetAsync(url);
                 var content = await response.Content.ReadAsStringAsync();
 
-                _logger.LogInformation($"📡 AbstractAPI Response Status: {response.StatusCode}");
-                _logger.LogInformation($"📡 AbstractAPI Response Body: {content}");
+                _logger.LogInformation($"📡 EmailListVerify Response Status: {response.StatusCode}");
+                _logger.LogInformation($"📡 EmailListVerify Response: {content}");
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogError($"❌ AbstractAPI error (Status {response.StatusCode}): {content}");
+                    _logger.LogError($"❌ EmailListVerify API error: {content}");
                     _logger.LogWarning("⚠️ Allowing registration due to API error");
-                    return true; // ✅ ALLOW if API fails
+                    return true; // Allow if API fails
                 }
 
-                var result = JsonSerializer.Deserialize<AbstractResponse>(content,
+                var result = JsonSerializer.Deserialize<EmailListVerifyResponse>(content,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-                _logger.LogInformation($"📊 AbstractAPI Result for {email}:");
-                _logger.LogInformation($"   - Deliverability: {result?.Deliverability ?? "NULL"}");
-                _logger.LogInformation($"   - Is Valid Format: {result?.IsValidFormat?.Value.ToString() ?? "NULL"}");
-                _logger.LogInformation($"   - Is Free Email: {result?.IsFreeEmail?.Value.ToString() ?? "NULL"}");
-                _logger.LogInformation($"   - Is Disposable: {result?.IsDisposableEmail?.Value.ToString() ?? "NULL"}");
+                _logger.LogInformation($"📊 EmailListVerify Result:");
+                _logger.LogInformation($"   - Status: {result?.Status}");
+                _logger.LogInformation($"   - Email: {result?.Email}");
 
-                // ✅ Check if email is deliverable and has valid format
-                bool isDeliverable = result?.Deliverability == "DELIVERABLE";
-                bool isValidFormat = result?.IsValidFormat?.Value == true;
+                // Accept if status is "ok" or "valid"
+                // Possible statuses: "ok", "email_disabled", "invalid", "unknown", "disposable"
+                bool isValid = result?.Status?.ToLower() == "ok";
 
-                _logger.LogInformation($"   - isDeliverable: {isDeliverable}");
-                _logger.LogInformation($"   - isValidFormat: {isValidFormat}");
-
-                // ✅ Accept email if BOTH conditions are true
-                bool isReal = isDeliverable && isValidFormat;
-
-                if (isReal)
+                if (isValid)
                 {
                     _logger.LogInformation($"✅ Email ACCEPTED: {email}");
                 }
                 else
                 {
-                    _logger.LogWarning($"❌ Email REJECTED: {email}");
-                    _logger.LogWarning($"   Reason: Deliverability={result?.Deliverability}, ValidFormat={result?.IsValidFormat?.Value}");
+                    _logger.LogWarning($"❌ Email REJECTED: {email} - Status: {result?.Status}");
                 }
 
-                return isReal;
+                return isValid;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"❌ Exception while validating email: {email}");
+                _logger.LogError(ex, $"❌ Exception validating email: {email}");
                 _logger.LogWarning("⚠️ Allowing registration due to exception");
-                return true; // ✅ ALLOW if exception occurs
+                return true; // Allow if exception
             }
         }
 
-        private class AbstractResponse
+        private class EmailListVerifyResponse
         {
-            public string? Deliverability { get; set; }
-            public FormatInfo? IsValidFormat { get; set; }
-            public FreeEmailInfo? IsFreeEmail { get; set; }
-            public DisposableEmailInfo? IsDisposableEmail { get; set; }
-        }
-
-        private class FormatInfo
-        {
-            public bool Value { get; set; }
-        }
-
-        private class FreeEmailInfo
-        {
-            public bool Value { get; set; }
-        }
-
-        private class DisposableEmailInfo
-        {
-            public bool Value { get; set; }
+            public string? Email { get; set; }
+            public string? Status { get; set; }
+            public string? StatusCode { get; set; }
         }
     }
 }
