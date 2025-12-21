@@ -52,16 +52,14 @@ namespace MielShop.API.Services
                     return true; // Allow if API fails
                 }
 
-                var result = JsonSerializer.Deserialize<EmailListVerifyResponse>(content,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                // EmailListVerify returns plain text status, not JSON
+                var status = content.Trim().ToLower();
 
-                _logger.LogInformation($"📊 EmailListVerify Result:");
-                _logger.LogInformation($"   - Status: {result?.Status}");
-                _logger.LogInformation($"   - Email: {result?.Email}");
+                _logger.LogInformation($"📊 EmailListVerify Status: {status}");
 
-                // Accept if status is "ok" or "valid"
-                // Possible statuses: "ok", "email_disabled", "invalid", "unknown", "disposable"
-                bool isValid = result?.Status?.ToLower() == "ok";
+                // Accept only if status is "ok"
+                // Possible statuses: "ok", "email_disabled", "invalid", "unknown", "disposable", "error"
+                bool isValid = status == "ok";
 
                 if (isValid)
                 {
@@ -69,7 +67,7 @@ namespace MielShop.API.Services
                 }
                 else
                 {
-                    _logger.LogWarning($"❌ Email REJECTED: {email} - Status: {result?.Status}");
+                    _logger.LogWarning($"❌ Email REJECTED: {email} - Status: {status}");
                 }
 
                 return isValid;
@@ -80,13 +78,6 @@ namespace MielShop.API.Services
                 _logger.LogWarning("⚠️ Allowing registration due to exception");
                 return true; // Allow if exception
             }
-        }
-
-        private class EmailListVerifyResponse
-        {
-            public string? Email { get; set; }
-            public string? Status { get; set; }
-            public string? StatusCode { get; set; }
         }
     }
 }
