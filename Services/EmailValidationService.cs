@@ -28,8 +28,9 @@ namespace MielShop.API.Services
 
                 if (string.IsNullOrEmpty(apiKey))
                 {
-                    _logger.LogError("⚠️ ABSTRACT_API_KEY not found in Railway environment variables!");
-                    return false; // ❌ BLOCK if API key missing
+                    _logger.LogError("❌ ABSTRACT_API_KEY not found in environment variables!");
+                    _logger.LogWarning("⚠️ Allowing registration since API key is missing");
+                    return true; // ✅ ALLOW if API key missing (for now, until you add it to Railway)
                 }
 
                 var httpClient = _httpClientFactory.CreateClient();
@@ -40,24 +41,34 @@ namespace MielShop.API.Services
                 var response = await httpClient.GetAsync(url);
                 var content = await response.Content.ReadAsStringAsync();
 
+                _logger.LogInformation($"📡 AbstractAPI Response Status: {response.StatusCode}");
+                _logger.LogInformation($"📡 AbstractAPI Response Body: {content}");
+
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogError($"❌ AbstractAPI error (Status {response.StatusCode}): {content}");
-                    return false; // ❌ BLOCK if API fails
+                    _logger.LogWarning("⚠️ Allowing registration due to API error");
+                    return true; // ✅ ALLOW if API fails
                 }
 
                 var result = JsonSerializer.Deserialize<AbstractResponse>(content,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-                _logger.LogInformation($"📊 AbstractAPI Response for {email}:");
-                _logger.LogInformation($"   - Deliverability: {result?.Deliverability}");
-                _logger.LogInformation($"   - Is Valid Format: {result?.IsValidFormat?.Value}");
-                _logger.LogInformation($"   - Is Free Email: {result?.IsFreeEmail?.Value}");
-                _logger.LogInformation($"   - Is Disposable: {result?.IsDisposableEmail?.Value}");
+                _logger.LogInformation($"📊 AbstractAPI Result for {email}:");
+                _logger.LogInformation($"   - Deliverability: {result?.Deliverability ?? "NULL"}");
+                _logger.LogInformation($"   - Is Valid Format: {result?.IsValidFormat?.Value.ToString() ?? "NULL"}");
+                _logger.LogInformation($"   - Is Free Email: {result?.IsFreeEmail?.Value.ToString() ?? "NULL"}");
+                _logger.LogInformation($"   - Is Disposable: {result?.IsDisposableEmail?.Value.ToString() ?? "NULL"}");
 
-                // ✅ STRICT VALIDATION - Email must be DELIVERABLE and VALID FORMAT
-                bool isReal = result?.Deliverability == "DELIVERABLE" &&
-                              result?.IsValidFormat?.Value == true;
+                // ✅ Check if email is deliverable and has valid format
+                bool isDeliverable = result?.Deliverability == "DELIVERABLE";
+                bool isValidFormat = result?.IsValidFormat?.Value == true;
+
+                _logger.LogInformation($"   - isDeliverable: {isDeliverable}");
+                _logger.LogInformation($"   - isValidFormat: {isValidFormat}");
+
+                // ✅ Accept email if BOTH conditions are true
+                bool isReal = isDeliverable && isValidFormat;
 
                 if (isReal)
                 {
@@ -65,15 +76,17 @@ namespace MielShop.API.Services
                 }
                 else
                 {
-                    _logger.LogWarning($"❌ Email REJECTED: {email} - Deliverability: {result?.Deliverability}, Valid Format: {result?.IsValidFormat?.Value}");
+                    _logger.LogWarning($"❌ Email REJECTED: {email}");
+                    _logger.LogWarning($"   Reason: Deliverability={result?.Deliverability}, ValidFormat={result?.IsValidFormat?.Value}");
                 }
 
                 return isReal;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"❌ Error validating email: {email}");
-                return false; // ❌ BLOCK if error occurs
+                _logger.LogError(ex, $"❌ Exception while validating email: {email}");
+                _logger.LogWarning("⚠️ Allowing registration due to exception");
+                return true; // ✅ ALLOW if exception occurs
             }
         }
 
