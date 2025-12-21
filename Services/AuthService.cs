@@ -42,18 +42,24 @@ namespace MielShop.API.Services
             if (await _context.Users.AnyAsync(u => u.Email.ToLower() == registerDto.Email.ToLower()))
             {
                 _logger.LogWarning($"❌ Email already exists: {registerDto.Email}");
-                return null; // Email already used
+                throw new InvalidOperationException("EMAIL_ALREADY_EXISTS");
             }
 
-            // ✅ VALIDATE EMAIL WITH ABSTRACTAPI
+            // ✅ VALIDATE EMAIL WITH ABSTRACTAPI - BLOCK IF INVALID
             bool emailIsReal = await _emailValidationService.IsEmailRealAsync(registerDto.Email);
 
-            _logger.LogInformation($"📧 Email validation for {registerDto.Email}: {(emailIsReal ? "REAL" : "FAKE")}");
+            _logger.LogInformation($"📧 Email validation for {registerDto.Email}: {(emailIsReal ? "REAL ✅" : "FAKE ❌")}");
+
+            if (!emailIsReal)
+            {
+                _logger.LogWarning($"❌ Registration BLOCKED - Invalid email: {registerDto.Email}");
+                throw new InvalidOperationException("INVALID_EMAIL");
+            }
 
             // Hash password
             var passwordHash = BCrypt.Net.BCrypt.HashPassword(registerDto.Password);
 
-            // Create new user
+            // Create new user - only if email is valid
             var user = new User
             {
                 Email = registerDto.Email,
@@ -62,7 +68,7 @@ namespace MielShop.API.Services
                 LastName = registerDto.LastName,
                 Role = "Customer",
                 IsActive = true,
-                EmailConfirmed = emailIsReal, // ✅ TRUE if real, FALSE if fake
+                EmailConfirmed = true, // ✅ Auto-confirm since AbstractAPI validated it
                 EmailVerificationToken = null,
                 EmailVerificationTokenExpires = null,
                 CreatedAt = DateTime.UtcNow,
@@ -72,7 +78,7 @@ namespace MielShop.API.Services
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation($"✅ User registered: {user.Email} (EmailConfirmed: {user.EmailConfirmed})");
+            _logger.LogInformation($"✅ User registered successfully: {user.Email} (EmailConfirmed: {user.EmailConfirmed})");
 
             // Generate JWT token
             var token = _jwtService.GenerateToken(user);

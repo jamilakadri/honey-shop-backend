@@ -27,11 +27,6 @@ namespace MielShop.API.Controllers
                 _logger.LogInformation($"📝 Registration attempt for: {registerDto.Email}");
 
                 var result = await _authService.RegisterAsync(registerDto);
-                if (result == null)
-                {
-                    _logger.LogWarning($"❌ Registration failed - email already exists: {registerDto.Email}");
-                    return BadRequest(new { message = "Cet email est déjà utilisé" });
-                }
 
                 _logger.LogInformation($"✅ User registered successfully: {registerDto.Email}");
                 return Ok(new
@@ -39,6 +34,16 @@ namespace MielShop.API.Controllers
                     message = "Inscription réussie!",
                     data = result
                 });
+            }
+            catch (InvalidOperationException ex) when (ex.Message == "EMAIL_ALREADY_EXISTS")
+            {
+                _logger.LogWarning($"❌ Registration failed - email already exists: {registerDto.Email}");
+                return BadRequest(new { message = "Cet email est déjà utilisé" });
+            }
+            catch (InvalidOperationException ex) when (ex.Message == "INVALID_EMAIL")
+            {
+                _logger.LogWarning($"❌ Registration failed - invalid email: {registerDto.Email}");
+                return BadRequest(new { message = "Cette adresse email semble invalide ou n'existe pas. Veuillez vérifier votre email." });
             }
             catch (Exception ex)
             {
@@ -126,19 +131,6 @@ namespace MielShop.API.Controllers
             {
                 _logger.LogError(ex, "Error changing password");
                 return StatusCode(500, new { message = "Erreur serveur" });
-            }
-        }
-
-        private bool IsValidEmail(string email)
-        {
-            try
-            {
-                var addr = new System.Net.Mail.MailAddress(email);
-                return addr.Address == email;
-            }
-            catch
-            {
-                return false;
             }
         }
     }
