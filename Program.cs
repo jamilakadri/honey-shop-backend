@@ -151,7 +151,7 @@ builder.Services.AddCors(options =>
     {
         var allowedOrigins = new List<string>
         {
-            "https://honey-shop-production-9137.up.railway.app",
+            "https://mieldeaoussou.up.railway.app",
             "http://localhost:4200"
         };
 
